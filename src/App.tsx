@@ -13,6 +13,7 @@ interface Message {
   timestamp: string;
   stage?: string;
   interactiveData?: any;
+  quotes?: RideQuote[];
 }
 
 interface ParsedState {
@@ -44,6 +45,7 @@ interface RideQuote {
   rating: number;
   commissionFree: boolean;
   deepLink: string;
+  distanceKm?: number;
 }
 
 interface TelemetryLog {
@@ -153,6 +155,9 @@ export default function App() {
     'ch_mc': { lat: 13.0500, lng: 80.2824, name: 'Marina Beach' },
     'ch_ct': { lat: 13.0822, lng: 80.2755, name: 'Chennai Central Station' },
     'ch_dl': { lat: 13.0205, lng: 80.1654, name: 'DLF IT Park Chennai' },
+    'ch_koyambedu': { lat: 13.0732, lng: 80.1912, name: 'Koyambedu Bus Terminus' },
+    'ch_velachery': { lat: 12.9792, lng: 80.2198, name: 'Velachery' },
+    'ch_adyar': { lat: 13.0012, lng: 80.2565, name: 'Adyar' },
     'bl_ap': { lat: 13.1986, lng: 77.7066, name: 'Kempegowda Int Airport (BLR)' },
     'bl_mg': { lat: 12.9754, lng: 77.6068, name: 'M.G. Road Metro Station' },
     'bl_or': { lat: 13.0451, lng: 77.6266, name: 'Manyata Tech Park' },
@@ -160,7 +165,12 @@ export default function App() {
     'bl_or_bellandur': { lat: 12.9268, lng: 77.6762, name: 'Bellandur EcoSpace' },
     'bl_or_hsr': { lat: 12.9116, lng: 77.6410, name: 'HSR Layout Sector 1' },
     'bl_or_ub': { lat: 12.9722, lng: 77.5958, name: 'UB City Mall' },
-    'bl_or_ind': { lat: 12.9719, lng: 77.6412, name: 'Indiranagar Double Road' }
+    'bl_or_ind': { lat: 12.9719, lng: 77.6412, name: 'Indiranagar Double Road' },
+    'bl_junnasandra': { lat: 12.9067, lng: 77.6826, name: 'Junnasandra' },
+    'bl_sarjapur': { lat: 12.9114, lng: 77.6944, name: 'Sarjapur Road' },
+    'bl_whitefield': { lat: 12.9698, lng: 77.7499, name: 'Whitefield' },
+    'bl_ecity': { lat: 12.8452, lng: 77.6635, name: 'Electronic City Phase 1' },
+    'bl_hebbal': { lat: 13.0358, lng: 77.5970, name: 'Hebbal' }
   };
 
   // Autocomplete fetch for Pickup
@@ -412,6 +422,19 @@ export default function App() {
     }, 600);
   };
 
+  // Helper to format duration in hrs and minutes (e.g., "1 hr 45 minutes")
+  const formatDuration = (mins: number) => {
+    if (mins < 60) {
+      return `${mins} minutes`;
+    }
+    const hrs = Math.floor(mins / 60);
+    const remainingMins = mins % 60;
+    if (remainingMins === 0) {
+      return `${hrs} ${hrs === 1 ? 'hr' : 'hrs'}`;
+    }
+    return `${hrs} ${hrs === 1 ? 'hr' : 'hrs'} ${remainingMins} minutes`;
+  };
+
   // Helper: Haversine distance in km
   const getDistanceKm = (lat1: number, lon1: number, lat2: number, lon2: number) => {
     const R = 6371; // Radius of earth
@@ -505,6 +528,7 @@ export default function App() {
         }
         if (data.stage === 'need_pickup') {
           setIsSchedulingCustom(false);
+          setActiveQuotes([]);
         }
 
         setParsedState(updatedState);
@@ -535,32 +559,248 @@ export default function App() {
         const text = messageText.toLowerCase();
         let updated = { ...parsedState };
         
-        if (text.includes('airport')) {
-          updated.dropoff = 'Chennai International Airport (MAA)';
-          updated.dropoffId = 'ch_ap';
+        // 1. Detect City Context (Bangalore vs Chennai vs others)
+        let cityContext: 'bangalore' | 'chennai' = 'bangalore'; // default
+        const hasBangaloreKeyword = text.includes('bangalore') || text.includes('bengaluru') || text.includes('bellandur') || text.includes('koramangala') || text.includes('hsr') || text.includes('manyata') || text.includes('blr') || text.includes('kempegowda') || text.includes('indiranagar') || text.includes('junnasandra') || text.includes('sarjapur') || text.includes('hebbal') || text.includes('electronic city');
+        const hasChennaiKeyword = text.includes('chennai') || text.includes('t nagar') || text.includes('anna nagar') || text.includes('velachery') || text.includes('marina') || text.includes('maa') || text.includes('dlf') || text.includes('meenambakkam') || text.includes('phoenix') || text.includes('koyambedu') || text.includes('adyar');
+        
+        if (hasChennaiKeyword) {
+          cityContext = 'chennai';
+        } else if (hasBangaloreKeyword) {
+          cityContext = 'bangalore';
+        } else {
+          if ((updated.pickup && updated.pickup.toLowerCase().includes('chennai')) || (updated.dropoff && updated.dropoff.toLowerCase().includes('chennai'))) {
+            cityContext = 'chennai';
+          }
         }
-        if (text.includes('t nagar')) {
-          updated.pickup = 'T Nagar Bus Terminus';
-          updated.pickupId = 'ch_tn';
+
+        // 2. Extract Passengers
+        if (updated.passengers === null) {
+          const passengerRegexes = [
+            /(\d+)\s*(?:people|person|passenger|member|traveler|pax|seat|members)/i,
+            /for\s+(\d+)\s*(?:people|person|passenger|member|traveler|pax|seat|members)?/i,
+            /\b([1-6])\s*(?:people|person|passenger|member|traveler|pax|seat|members)?\b/i
+          ];
+          for (const regex of passengerRegexes) {
+            const numMatch = text.match(regex);
+            if (numMatch) {
+              const num = parseInt(numMatch[1]);
+              if (num >= 1 && num <= 6) {
+                updated.passengers = num;
+                break;
+              }
+            }
+          }
+          if (updated.passengers === null) {
+            if (text.includes('one') || text.includes('single') || text.includes('myself') || text.includes('just me') || text.includes('solo')) {
+              updated.passengers = 1;
+            } else if (text.includes('two') || text.includes('couple') || text.includes('both')) {
+              updated.passengers = 2;
+            } else if (text.includes('three') || text.includes('triple')) {
+              updated.passengers = 3;
+            } else if (text.includes('four') || text.includes('group') || text.includes('family')) {
+              updated.passengers = 4;
+            }
+          }
         }
-        if (text.includes('phoenix')) {
-          updated.pickup = 'Phoenix Marketcity Mall';
-          updated.pickupId = 'ch_ph';
+
+        // 3. Extract Schedule Date and Time
+        let extractedDate: string | null = null;
+        let extractedTime: string | null = null;
+        if (text.includes('today')) {
+          extractedDate = 'Today';
+        } else if (text.includes('tomorrow') || text.includes('tommorow')) {
+          extractedDate = 'Tomorrow';
+        } else {
+          const dateMatch = text.match(/(\d{1,2})[\/\-](\d{1,2})([\/\-]\d{2,4})?/);
+          if (dateMatch) extractedDate = dateMatch[0];
         }
-        if (text.includes('home')) {
-          updated.pickup = userPreferences.home;
-          updated.pickupId = 'ch_an';
+
+        const timeMatch = text.match(/(\d{1,2})(?:[\s:]*(\d{2}))?\s*(am|pm)/i);
+        if (timeMatch) {
+          const hh = timeMatch[1].padStart(2, '0');
+          const mm = timeMatch[2] ? timeMatch[2] : '00';
+          const period = timeMatch[3].toUpperCase();
+          extractedTime = `${hh}:${mm} ${period}`;
         }
-        if (text.includes('office')) {
-          updated.dropoff = userPreferences.office;
-          updated.dropoffId = 'ch_dl';
+
+        if (extractedDate && extractedTime) {
+          updated.date = extractedDate;
+          updated.time = extractedTime;
+        } else if (extractedDate && !extractedTime) {
+          updated.date = extractedDate;
+          if (!updated.time) updated.time = '10:00 AM';
+        } else if (!extractedDate && extractedTime) {
+          if (!updated.date) updated.date = 'Today';
+          updated.time = extractedTime;
+        } else {
+          if (text.includes('now') || text.includes('immediate') || text.includes('current')) {
+            updated.date = 'Today';
+            updated.time = 'Now';
+          }
         }
+
+        // 4. Clean text for location matching
+        let cleanText = text
+          .replace(/\b(?:tomorrow|tommorow|today|yesterday|now|at|for)\b/gi, '')
+          .replace(/\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\b/gi, '')
+          .replace(/\b\d+\s*(?:people|person|passenger|member|traveler|pax|seat|members)?\b/gi, '')
+          .replace(/\b(?:one|two|three|four|five|six)\s*(?:people|person|passenger|member|traveler|pax|seat|members)?\b/gi, '')
+          .replace(/\s+/g, ' ')
+          .trim();
+
+        // 5. Extract Pickup and Dropoff from Clean Text using "from X to Y" or other keywords
+        const toFromRegex = /(?:from\s+)?(.+?)\s+to\s+(.+)/i;
+        const match = cleanText.match(toFromRegex);
+        let potentialPickup = '';
+        let potentialDropoff = '';
+        if (match) {
+          potentialPickup = match[1].replace(/^from\s+/i, '').trim();
+          potentialDropoff = match[2].trim();
+        }
+
+        // Map locations based on keywords
+        const mapLocation = (locationName: string) => {
+          const nameLower = locationName.toLowerCase();
+          if (nameLower.includes('airport')) {
+            if (cityContext === 'bangalore') {
+              return { name: 'Kempegowda International Airport (BLR)', id: 'bl_ap', lat: 13.1986, lng: 77.7066 };
+            } else {
+              return { name: 'Chennai International Airport (MAA)', id: 'ch_ap', lat: 12.9816, lng: 80.1643 };
+            }
+          }
+          if (nameLower.includes('bellandur')) {
+            return { name: 'Bellandur EcoSpace', id: 'bl_or_bellandur', lat: 12.9268, lng: 77.6762 };
+          }
+          if (nameLower.includes('koramangala')) {
+            return { name: 'Koramangala 4th Block', id: 'bl_km', lat: 12.9338, lng: 77.6244 };
+          }
+          if (nameLower.includes('manyata')) {
+            return { name: 'Manyata Tech Park', id: 'bl_or', lat: 13.0451, lng: 77.6266 };
+          }
+          if (nameLower.includes('indiranagar')) {
+            return { name: 'Indiranagar Double Road', id: 'bl_or_ind', lat: 12.9719, lng: 77.6412 };
+          }
+          if (nameLower.includes('hsr')) {
+            return { name: 'HSR Layout Sector 1', id: 'bl_or_hsr', lat: 12.9116, lng: 77.6410 };
+          }
+          if (nameLower.includes('ub city')) {
+            return { name: 'UB City Mall', id: 'bl_or_ub', lat: 12.9722, lng: 77.5958 };
+          }
+          if (nameLower.includes('t nagar')) {
+            return { name: 'T Nagar Bus Terminus', id: 'ch_tn', lat: 13.0315, lng: 80.2312 };
+          }
+          if (nameLower.includes('phoenix')) {
+            return { name: 'Phoenix Marketcity Mall Chennai', id: 'ch_ph', lat: 12.9915, lng: 80.2170 };
+          }
+          if (nameLower.includes('anna nagar')) {
+            return { name: 'Anna Nagar West', id: 'ch_an', lat: 13.0850, lng: 80.2010 };
+          }
+          if (nameLower.includes('marina')) {
+            return { name: 'Marina Beach', id: 'ch_mc', lat: 13.0500, lng: 80.2824 };
+          }
+          if (nameLower.includes('central station')) {
+            return { name: 'Chennai Central Railway Station', id: 'ch_ct', lat: 13.0822, lng: 80.2755 };
+          }
+          if (nameLower.includes('dlf')) {
+            return { name: 'DLF IT Park Chennai', id: 'ch_dl', lat: 13.0205, lng: 80.1654 };
+          }
+          if (nameLower.includes('home')) {
+            return { name: userPreferences.home, id: 'ch_an', lat: 13.0850, lng: 80.2010 };
+          }
+          if (nameLower.includes('office')) {
+            return { name: userPreferences.office, id: 'ch_dl', lat: 13.0205, lng: 80.1654 };
+          }
+          
+          // Fallback coordinate generation for any location name in the city context
+          if (locationName.trim().length > 0) {
+            const hashVal = locationName.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+            const centerLat = cityContext === 'bangalore' ? 12.9716 : 13.0827;
+            const centerLng = cityContext === 'bangalore' ? 77.5946 : 80.2707;
+            const latOff = ((hashVal % 100) - 50) / 600;
+            const lngOff = (((hashVal >> 2) % 100) - 50) / 600;
+            return {
+              name: locationName.replace(/\b\w/g, c => c.toUpperCase()),
+              id: 'local_custom_' + hashVal,
+              lat: parseFloat((centerLat + latOff).toFixed(4)),
+              lng: parseFloat((centerLng + lngOff).toFixed(4))
+            };
+          }
+          return null;
+        };
+
+        if (potentialPickup && potentialDropoff) {
+          const mappedPickup = mapLocation(potentialPickup);
+          if (mappedPickup) {
+            updated.pickup = mappedPickup.name;
+            updated.pickupId = mappedPickup.id;
+            updated.pickupLat = mappedPickup.lat;
+            updated.pickupLng = mappedPickup.lng;
+
+            // Dynamically refine cityContext based on mapped pickup coordinates!
+            if (mappedPickup.lat >= 12.7 && mappedPickup.lat <= 13.3 && mappedPickup.lng >= 77.3 && mappedPickup.lng <= 77.9) {
+              cityContext = 'bangalore';
+            } else if (mappedPickup.lat >= 12.8 && mappedPickup.lat <= 13.3 && mappedPickup.lng >= 80.0 && mappedPickup.lng <= 80.4) {
+              cityContext = 'chennai';
+            }
+          }
+          
+          const mappedDropoff = mapLocation(potentialDropoff);
+          if (mappedDropoff) {
+            updated.dropoff = mappedDropoff.name;
+            updated.dropoffId = mappedDropoff.id;
+            updated.dropoffLat = mappedDropoff.lat;
+            updated.dropoffLng = mappedDropoff.lng;
+          }
+
+          // SMART CORRECTION: Align pickup and dropoff city contexts if they resolved differently
+          if (updated.pickupLat && updated.pickupLng && updated.dropoffLat && updated.dropoffLng) {
+            const pIsBangalore = updated.pickupLat >= 12.7 && updated.pickupLat <= 13.3 && updated.pickupLng >= 77.3 && updated.pickupLng <= 77.9;
+            const pIsChennai = updated.pickupLat >= 12.8 && updated.pickupLat <= 13.3 && updated.pickupLng >= 80.0 && updated.pickupLng <= 80.4;
+            const dIsBangalore = updated.dropoffLat >= 12.7 && updated.dropoffLat <= 13.3 && updated.dropoffLng >= 77.3 && updated.dropoffLng <= 77.9;
+            const dIsChennai = updated.dropoffLat >= 12.8 && updated.dropoffLat <= 13.3 && updated.dropoffLng >= 80.0 && updated.dropoffLng <= 80.4;
+
+            if (pIsBangalore && dIsChennai) {
+              cityContext = 'bangalore';
+              const correctedDrop = mapLocation(potentialDropoff);
+              if (correctedDrop) {
+                updated.dropoff = correctedDrop.name;
+                updated.dropoffId = correctedDrop.id;
+                updated.dropoffLat = correctedDrop.lat;
+                updated.dropoffLng = correctedDrop.lng;
+              }
+            } else if (pIsChennai && dIsBangalore) {
+              cityContext = 'chennai';
+              const correctedDrop = mapLocation(potentialDropoff);
+              if (correctedDrop) {
+                updated.dropoff = correctedDrop.name;
+                updated.dropoffId = correctedDrop.id;
+                updated.dropoffLat = correctedDrop.lat;
+                updated.dropoffLng = correctedDrop.lng;
+              }
+            }
+          }
+        } else {
+          const mapped = mapLocation(cleanText);
+          if (mapped) {
+            if (!updated.pickup) {
+              updated.pickup = mapped.name;
+              updated.pickupId = mapped.id;
+              updated.pickupLat = mapped.lat;
+              updated.pickupLng = mapped.lng;
+            } else if (!updated.dropoff) {
+              updated.dropoff = mapped.name;
+              updated.dropoffId = mapped.id;
+              updated.dropoffLat = mapped.lat;
+              updated.dropoffLng = mapped.lng;
+            }
+          }
+        }
+
         if (text.includes('auto')) updated.rideType = 'auto';
         else if (text.includes('bike')) updated.rideType = 'bike';
         else if (text.includes('suv')) updated.rideType = 'suv';
         else if (text.includes('cab')) updated.rideType = 'cab';
-
-        if (text.includes('tomorrow')) updated.date = 'Tomorrow';
 
         setParsedState(updated);
         
@@ -572,8 +812,14 @@ export default function App() {
         } else if (!updated.dropoff) {
           reply = `Got your starting point at *${updated.pickup}*. Where is your dropoff destination?`;
           nextStage = "need_dropoff";
+        } else if (updated.passengers === null) {
+          reply = `Perfect! Pickup: *${updated.pickup}* ➔ Dropoff: *${updated.dropoff}*.\n\n*How many members* (passengers) will be traveling?`;
+          nextStage = "need_passengers";
+        } else if (!updated.date) {
+          reply = `Got it! Understood, *${updated.passengers} traveler(s)*.\n\nWould you like to travel *now* or *schedule for later*?`;
+          nextStage = "need_datetime";
         } else {
-          reply = `🚗 Perfect! Connecting RideEasy adapters to calculate price options from *${updated.pickup}* to *${updated.dropoff}*...`;
+          reply = `🚗 Perfect! Connecting RideEasy adapters to calculate price options from *${updated.pickup}* to *${updated.dropoff}* for *${updated.passengers} travelers* on *${updated.date} ${updated.time || 'Now'}*...`;
           nextStage = "quoting";
           calculateAdapterQuotes(updated);
         }
@@ -760,11 +1006,26 @@ export default function App() {
     ];
 
     // Combine and sort quotes
-    let allQuotes = [...uberQuotes, ...olaQuotes, ...rapidoQuotes, ...nammaYatriQuotes];
+    let allQuotes = [...uberQuotes, ...olaQuotes, ...rapidoQuotes, ...nammaYatriQuotes].map(q => ({
+      ...q,
+      distanceKm: distance
+    }));
     if (trip.passengers !== null && trip.passengers > 1) {
       allQuotes = allQuotes.filter(q => q.category !== 'bike');
     }
     setActiveQuotes(allQuotes);
+
+    const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    setChatHistory(prev => [
+      ...prev,
+      {
+        sender: 'bot',
+        text: `🔍 *I found the following ride options for your trip (${distance} km, est. ${formatDuration(duration)}):*`,
+        timestamp,
+        stage: 'quoting',
+        quotes: allQuotes
+      }
+    ]);
 
     addLog('PostHog', 'event', 'PostHog tracked: quotes_calculated', { distance, numQuotes: allQuotes.length });
     addLog('Supabase', 'info', `Wrote ${allQuotes.length} active ride_quotes rows to Supabase linked with trip_id.`, { trip_id: 'trip_' + Date.now().toString().slice(-4) });
@@ -809,8 +1070,8 @@ export default function App() {
   };
 
   // Sort & Filter logic
-  const getSortedAndFilteredQuotes = () => {
-    let list = [...activeQuotes];
+  const getSortedAndFilteredQuotesForList = (quotesList: RideQuote[]) => {
+    let list = [...quotesList];
     if (filterCategory !== 'all') {
       list = list.filter(q => q.category === filterCategory);
     }
@@ -828,6 +1089,47 @@ export default function App() {
       });
     }
     return list;
+  };
+
+  const getSortedAndFilteredQuotes = () => {
+    return getSortedAndFilteredQuotesForList(activeQuotes);
+  };
+
+  const getQuoteBadgeAndReason = (quote: RideQuote, allQuotesInMsg: RideQuote[]) => {
+    const minFare = Math.min(...allQuotesInMsg.map(q => q.fare));
+    const minEta = Math.min(...allQuotesInMsg.map(q => q.etaMinutes));
+    
+    // Calculate value score for all
+    const valueScores = allQuotesInMsg.map(q => ({
+      id: q.id,
+      score: (q.rating * 20) - (q.fare / 10) + (q.commissionFree ? 15 : 0)
+    }));
+    const maxScore = Math.max(...valueScores.map(v => v.score));
+    const isBestValue = valueScores.find(v => v.id === quote.id)?.score === maxScore;
+
+    if (isBestValue) {
+      return {
+        badge: '⭐ Recommended',
+        reason: quote.provider === 'Namma Yatri' 
+          ? 'Best value & commission-free' 
+          : 'Best overall value for money'
+      };
+    } else if (quote.fare === minFare) {
+      return {
+        badge: '💰 Cheapest',
+        reason: 'Lowest fare for this route'
+      };
+    } else if (quote.etaMinutes === minEta) {
+      return {
+        badge: '⚡ Fastest',
+        reason: 'Quickest pickup time'
+      };
+    } else {
+      return {
+        badge: null,
+        reason: `Reliable choice with ${quote.rating}★ rating`
+      };
+    }
   };
 
   const processedQuotes = getSortedAndFilteredQuotes();
@@ -1478,6 +1780,52 @@ export default function App() {
                 </div>
               </div>
 
+              {/* Comparison Filters Panel */}
+              {activeQuotes.length > 0 && (
+                <div className="bg-slate-900/90 rounded-xl border border-slate-800 p-4 shadow-xl space-y-4">
+                  <div className="flex items-center space-x-2 border-b border-slate-800 pb-2">
+                    <Filter className="w-4 h-4 text-emerald-400" />
+                    <h3 className="font-bold text-xs tracking-wider uppercase text-slate-300">Comparison Filters</h3>
+                  </div>
+                  
+                  <div className="space-y-3">
+                    <div className="flex flex-col space-y-1.5">
+                      <span className="text-[10px] text-slate-400 font-medium">Category Filter</span>
+                      <div className="flex bg-slate-950 rounded p-0.5 border border-slate-800/80 w-full justify-between">
+                        {['all', ...(parsedState.passengers === null || parsedState.passengers === 1 ? ['bike'] : []), 'auto', 'cab', 'suv'].map(cat => (
+                          <button
+                            key={cat}
+                            onClick={() => setFilterCategory(cat as any)}
+                            className={`flex-1 px-1.5 py-1 rounded text-[9px] capitalize font-semibold transition text-center ${filterCategory === cat ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}
+                          >
+                            {cat}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col space-y-1.5">
+                      <span className="text-[10px] text-slate-400 font-medium">Sort By</span>
+                      <div className="flex bg-slate-950 rounded p-0.5 border border-slate-800/80 w-full justify-between">
+                        {[
+                          { key: 'price', label: '💰 Fare' },
+                          { key: 'eta', label: '⚡ ETA' },
+                          { key: 'value', label: '⭐ Recommended' }
+                        ].map(opt => (
+                          <button
+                            key={opt.key}
+                            onClick={() => setSortBy(opt.key as any)}
+                            className={`flex-1 px-1 py-1 rounded text-[9px] font-semibold transition text-center ${sortBy === opt.key ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}
+                          >
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Saved Place Quick Links & User Preference Modifiers */}
               <div className="bg-slate-900/90 rounded-xl border border-slate-800 p-4 shadow-xl">
                 <div className="flex items-center justify-between border-b border-slate-800 pb-3 mb-3">
@@ -1584,7 +1932,7 @@ export default function App() {
             </div>
 
             {/* Central Simulator Panel: WhatsApp simulated chat screen */}
-            <div className="lg:col-span-4 bg-slate-950 flex flex-col border-r border-slate-800 relative">
+            <div className="lg:col-span-5 bg-slate-950 flex flex-col border-r border-slate-800 relative">
               
               {/* Simulated Mobile Device Frame Header */}
               <div className="bg-emerald-800 text-white px-4 py-3 flex items-center justify-between shadow-md">
@@ -1627,6 +1975,156 @@ export default function App() {
                       {/* Bold converter helper for simulated WhatsApp style (*bold* to <strong>) */}
                       {chat.text.split('*').map((chunk, cIdx) => 
                         cIdx % 2 === 1 ? <strong key={cIdx} className="font-bold text-emerald-300">{chunk}</strong> : chunk
+                      )}
+
+                      {chat.quotes && chat.quotes.length > 0 && (
+                        <div className="mt-3 space-y-3 pt-3 border-t border-slate-700/50">
+                          {getSortedAndFilteredQuotesForList(chat.quotes || []).map((quote) => {
+                            const filteredList = getSortedAndFilteredQuotesForList(chat.quotes || []);
+                            const { badge, reason } = getQuoteBadgeAndReason(quote, filteredList);
+                            
+                            const isBestPrice = quote.fare === Math.min(...filteredList.map(q => q.fare));
+                            const isFastest = quote.etaMinutes === Math.min(...filteredList.map(q => q.etaMinutes));
+
+                            const isExpanded = expandedQuoteId === quote.id;
+
+                            const isAirport = !!(parsedState.pickup?.toLowerCase().includes('airport') || parsedState.dropoff?.toLowerCase().includes('airport'));
+                            const airportFee = isAirport ? 100 : 0;
+                            
+                            let platformFee = 15;
+                            if (quote.provider === 'Namma Yatri') platformFee = 0;
+                            else if (quote.provider === 'Rapido') platformFee = 10;
+                            else if (quote.provider === 'Ola') platformFee = 20;
+
+                            const gst = Math.round(quote.fare * 0.0476);
+                            
+                            let baseFee = 30;
+                            if (quote.category === 'bike') baseFee = 15;
+                            else if (quote.category === 'auto') baseFee = 25;
+                            else if (quote.category === 'suv') baseFee = 60;
+
+                            const distanceCharge = Math.max(0, quote.fare - airportFee - platformFee - gst - baseFee);
+
+                            return (
+                              <div 
+                                key={quote.id}
+                                className="bg-[#111b21] border border-slate-800/80 rounded-xl p-3 shadow-md hover:border-slate-700 transition text-[#e9edef] space-y-2.5 text-left"
+                              >
+                                {/* Top Line: Provider and Badge */}
+                                <div className="flex items-start justify-between">
+                                  <div className="flex items-center space-x-2">
+                                    <div className={`px-2 py-1 rounded text-center font-black text-[10px] ${
+                                      quote.provider === 'Uber' ? 'bg-black text-white border border-slate-800' :
+                                      quote.provider === 'Ola' ? 'bg-lime-500 text-slate-950' :
+                                      quote.provider === 'Rapido' ? 'bg-amber-400 text-black' :
+                                      'bg-[#ff5a00] text-white'
+                                    }`}>
+                                      {quote.provider.slice(0, 2).toUpperCase()}
+                                    </div>
+                                    <div>
+                                      <h4 className="font-bold text-xs text-white flex items-center space-x-1.5 flex-wrap gap-1">
+                                        <span>{quote.vehicle}</span>
+                                        {quote.commissionFree && (
+                                          <span className="text-[7px] text-emerald-400 font-extrabold bg-emerald-950 px-1 py-0.2 rounded border border-emerald-900/50 uppercase tracking-widest">Commission Free</span>
+                                        )}
+                                      </h4>
+                                      <div className="flex items-center space-x-1 mt-0.5 text-[9px] text-slate-400">
+                                        <span>{quote.provider}</span>
+                                        <span>•</span>
+                                        <span className="text-emerald-400 font-medium">★ {quote.rating}</span>
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  <div className="text-right">
+                                    <span className="text-sm font-black text-white">₹{quote.fare}</span>
+                                    {quote.surge && (
+                                      <span className="block text-[7px] text-amber-400 font-semibold bg-amber-950/80 border border-amber-900/40 rounded px-1 mt-0.5">
+                                        ⚡ Surge {quote.surgeMultiplier}x
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+
+                                {/* Badges and Reasons */}
+                                {badge && (
+                                  <div className="flex items-center space-x-1.5 bg-[#1f2c34]/50 px-2 py-1 rounded border border-slate-800/30">
+                                    <span className={`text-[8px] font-extrabold uppercase px-1 rounded ${
+                                      badge.includes('Recommended') ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' :
+                                      badge.includes('Cheapest') ? 'bg-yellow-950 text-yellow-400 border border-yellow-800' :
+                                      'bg-blue-950 text-blue-400 border border-blue-800'
+                                    }`}>
+                                      {badge.replace('⭐ ', '').replace('💰 ', '').replace('⚡ ', '')}
+                                    </span>
+                                    <span className="text-[9px] text-slate-300 italic">{reason}</span>
+                                  </div>
+                                )}
+
+                                {/* Details & CTA */}
+                                <div className="pt-2 border-t border-slate-800/50 flex items-center justify-between text-[10px]">
+                                  <div className="flex items-center space-x-1.5 text-slate-400 text-[9px]">
+                                    <span>Dist: <strong className="text-slate-200">{quote.distanceKm || '—'} km</strong></span>
+                                    <span>|</span>
+                                    <span>Duration: <strong className="text-slate-200">{formatDuration(quote.durationMinutes)}</strong></span>
+                                    <span>|</span>
+                                    <span>ETA: <strong className="text-slate-200">{quote.etaMinutes} mins</strong></span>
+                                  </div>
+
+                                  <div className="flex items-center space-x-1.5">
+                                    <button
+                                      onClick={() => setExpandedQuoteId(isExpanded ? null : quote.id)}
+                                      className="text-slate-400 hover:text-white underline text-[9px] mr-1 cursor-pointer"
+                                    >
+                                      {isExpanded ? 'Hide Charges' : 'View Charges'}
+                                    </button>
+                                    <button 
+                                      onClick={() => handleRedirect(quote)}
+                                      className="bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white font-bold px-2.5 py-1 rounded text-[10px] transition flex items-center space-x-1 cursor-pointer"
+                                    >
+                                      <span>Book Now</span>
+                                      <ExternalLink className="w-2.5 h-2.5" />
+                                    </button>
+                                  </div>
+                                </div>
+
+                                {/* Expanded breakdown receipt */}
+                                {isExpanded && (
+                                  <div className="mt-2 p-2.5 bg-slate-950 rounded-lg border border-slate-800/80 space-y-1 text-[9px] text-slate-400">
+                                    <span className="text-[7px] uppercase tracking-wider font-extrabold text-slate-500 block mb-0.5">Fare Breakdown Summary</span>
+                                    <div className="flex justify-between">
+                                      <span>Base Flag-down Fee</span>
+                                      <span>₹{baseFee}</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                      <span>Distance-based rate</span>
+                                      <span>₹{distanceCharge}</span>
+                                    </div>
+                                    {airportFee > 0 && (
+                                      <div className="flex justify-between">
+                                        <span>Airport Fee</span>
+                                        <span>₹{airportFee}</span>
+                                      </div>
+                                    )}
+                                    <div className="flex justify-between">
+                                      <span>Platform Svc Booking Fee</span>
+                                      <span className={quote.provider === 'Namma Yatri' ? 'text-emerald-400 font-bold' : ''}>
+                                        {quote.provider === 'Namma Yatri' ? '₹0 (Direct!)' : `₹${platformFee}`}
+                                      </span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                      <span>GST Tax (5%)</span>
+                                      <span>₹{gst}</span>
+                                    </div>
+                                    <div className="border-t border-slate-800 pt-1 flex justify-between font-bold text-white text-[10px]">
+                                      <span>Total Estimated Fare</span>
+                                      <span className="text-emerald-400">₹{quote.fare}</span>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
                       )}
                       
                       <div className="text-[9px] text-[#8696a0] text-right mt-1.5 font-mono">
@@ -1672,216 +2170,10 @@ export default function App() {
             </div>
 
             {/* Right Sandbox Panel: Calculated Quotes & live dev logs */}
-            <div className="lg:col-span-4 bg-slate-950 flex flex-col border-slate-800 overflow-hidden">
+            <div className="lg:col-span-3 bg-slate-950 flex flex-col border-slate-800 overflow-hidden">
               
-              {/* Aggregator Results comparison view */}
-              <div className="h-2/3 border-b border-slate-800 flex flex-col overflow-hidden">
-                <div className="bg-slate-900/80 px-4 py-3 border-b border-slate-800 flex items-center justify-between">
-                  <div className="flex items-center space-x-2">
-                    <Filter className="w-4 h-4 text-emerald-400" />
-                    <h3 className="font-bold text-xs tracking-wider uppercase text-slate-300">Ride Comparison Matrix</h3>
-                  </div>
-                  <span className="text-[10px] text-slate-400 font-mono">
-                    {processedQuotes.length} active quotes
-                  </span>
-                </div>
-
-                {/* Filters & Sorters */}
-                <div className="p-3 bg-slate-900/20 border-b border-slate-800 flex flex-col space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] text-slate-400 font-medium">Category Filter</span>
-                    <div className="flex bg-slate-950 rounded p-0.5 border border-slate-800">
-                      {['all', ...(parsedState.passengers === null || parsedState.passengers === 1 ? ['bike'] : []), 'auto', 'cab', 'suv'].map(cat => (
-                        <button
-                          key={cat}
-                          onClick={() => setFilterCategory(cat as any)}
-                          className={`px-2 py-0.5 rounded text-[9px] capitalize font-semibold transition ${filterCategory === cat ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-white'}`}
-                        >
-                          {cat}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] text-slate-400 font-medium">Sort By</span>
-                    <div className="flex bg-slate-950 rounded p-0.5 border border-slate-800">
-                      {[
-                        { key: 'price', label: '💰 Lowest Fare' },
-                        { key: 'eta', label: '⚡ Best ETA' },
-                        { key: 'value', label: '⭐ Value Match' }
-                      ].map(opt => (
-                        <button
-                          key={opt.key}
-                          onClick={() => setSortBy(opt.key as any)}
-                          className={`px-2 py-0.5 rounded text-[9px] font-semibold transition ${sortBy === opt.key ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-white'}`}
-                        >
-                          {opt.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Compared Quotes list */}
-                <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
-                  {processedQuotes.length === 0 ? (
-                    <div className="h-full flex flex-col items-center justify-center text-center p-6 text-slate-500 space-y-2">
-                      <MapIcon className="w-10 h-10 text-slate-700 animate-pulse" />
-                      <p className="text-xs">No active ride comparison.</p>
-                      <p className="text-[10px] text-slate-600">Simulate a trip by messaging the WhatsApp bot with pickup and dropoff points.</p>
-                    </div>
-                  ) : (
-                    processedQuotes.map((quote) => {
-                      // Establish recommendation badge
-                      let isBestPrice = quote.fare === Math.min(...processedQuotes.map(q => q.fare));
-                      let isFastest = quote.etaMinutes === Math.min(...processedQuotes.map(q => q.etaMinutes));
-
-                      // Calculate receipt charges breakdown details dynamically
-                      const isAirport = !!(parsedState.pickup?.toLowerCase().includes('airport') || parsedState.dropoff?.toLowerCase().includes('airport'));
-                      const airportFee = isAirport ? 100 : 0;
-                      
-                      let platformFee = 15;
-                      if (quote.provider === 'Namma Yatri') platformFee = 0;
-                      else if (quote.provider === 'Rapido') platformFee = 10;
-                      else if (quote.provider === 'Ola') platformFee = 20;
-
-                      const gst = Math.round(quote.fare * 0.0476); // 5% GST of subtotal
-                      
-                      let baseFee = 30;
-                      if (quote.category === 'bike') baseFee = 15;
-                      else if (quote.category === 'auto') baseFee = 25;
-                      else if (quote.category === 'suv') baseFee = 60;
-
-                      const distanceCharge = Math.max(0, quote.fare - airportFee - platformFee - gst - baseFee);
-                      const isExpanded = expandedQuoteId === quote.id;
-                      
-                      return (
-                        <div 
-                          key={quote.id}
-                          className="bg-slate-900 border border-slate-800/80 rounded-xl p-3 shadow-md hover:border-slate-700 transition space-y-2"
-                        >
-                          <div className="flex items-start justify-between">
-                            <div className="flex items-center space-x-2.5">
-                              {/* Provider Icon/Badge */}
-                              <div className={`px-2 py-1.5 rounded-lg text-center font-bold text-xs ${
-                                quote.provider === 'Uber' ? 'bg-black text-white border border-slate-700' :
-                                quote.provider === 'Ola' ? 'bg-lime-500 text-slate-950 font-black' :
-                                quote.provider === 'Rapido' ? 'bg-amber-400 text-black font-extrabold' :
-                                'bg-[#ff5a00] text-white' // Namma Yatri
-                              }`}>
-                                {quote.provider.slice(0, 2).toUpperCase()}
-                              </div>
-                              <div>
-                                <h4 className="font-bold text-xs text-white">{quote.vehicle}</h4>
-                                <div className="flex items-center space-x-1.5 mt-0.5 text-[10px]">
-                                  <span className="text-slate-400">{quote.provider}</span>
-                                  <span className="text-slate-600">•</span>
-                                  <span className="text-emerald-400 flex items-center">⭐ {quote.rating}</span>
-                                  {quote.commissionFree && (
-                                    <>
-                                      <span className="text-slate-600">•</span>
-                                      <span className="text-emerald-500 font-bold bg-emerald-950/80 px-1.5 py-0.2 rounded text-[8px] uppercase tracking-wider border border-emerald-800/60">Commission Free</span>
-                                    </>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-                            
-                            {/* Fare and Surge indicator */}
-                            <div className="text-right">
-                              <span className="text-lg font-black text-white">₹{quote.fare}</span>
-                              {quote.surge && (
-                                <span className="block text-[8px] text-amber-400 font-semibold bg-amber-950/80 border border-amber-800/60 rounded px-1 mt-0.5">
-                                  ⚡ Surge {quote.surgeMultiplier}x
-                                </span>
-                              )}
-                            </div>
-                          </div>
-
-                          {/* Details Row & Badges */}
-                          <div className="pt-2 border-t border-slate-800/60 flex items-center justify-between text-[10px]">
-                            <div className="flex items-center space-x-2">
-                              <span className="text-slate-400">ETA: <strong className="text-white">{quote.etaMinutes} mins</strong></span>
-                              <span className="text-slate-600">|</span>
-                              <span className="text-slate-400">Ride: <strong className="text-white">{quote.durationMinutes} mins</strong></span>
-                            </div>
-                            
-                            <div className="flex items-center space-x-1.5">
-                              <button
-                                onClick={() => setExpandedQuoteId(isExpanded ? null : quote.id)}
-                                className="text-slate-400 hover:text-white underline text-[9px] mr-1 cursor-pointer"
-                              >
-                                {isExpanded ? 'Hide Charges ▴' : 'View Charges ▾'}
-                              </button>
-                              {isBestPrice && (
-                                <span className="bg-emerald-950 text-emerald-400 border border-emerald-800 px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-wider">
-                                  Best Price
-                                </span>
-                              )}
-                              {isFastest && (
-                                <span className="bg-blue-950 text-blue-400 border border-blue-800 px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-wider">
-                                  Fastest
-                                </span>
-                              )}
-                              <button 
-                                onClick={() => handleRedirect(quote)}
-                                className="bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white font-bold px-3 py-1 rounded transition flex items-center space-x-1 cursor-pointer"
-                              >
-                                <span>Book</span>
-                                <ExternalLink className="w-3 h-3" />
-                              </button>
-                            </div>
-                          </div>
-
-                          {/* Expanded Detailed Charges Breakdown Receipt */}
-                          {isExpanded && (
-                            <div className="mt-2.5 p-3 bg-slate-950 rounded-lg border border-slate-850 space-y-1.5 text-[10px] animate-fadeIn">
-                              <span className="text-[8px] uppercase tracking-wider font-extrabold text-slate-500 block mb-1">Fare Breakdown Summary (GST Incl.)</span>
-                              <div className="flex justify-between text-slate-400">
-                                <span>Base Flag-down Fee</span>
-                                <span>₹{baseFee}</span>
-                              </div>
-                              <div className="flex justify-between text-slate-400">
-                                <span>Distance-based rate</span>
-                                <span>₹{distanceCharge}</span>
-                              </div>
-                              {airportFee > 0 && (
-                                <div className="flex justify-between text-slate-400">
-                                  <span>Airport Parking & Access fee</span>
-                                  <span>₹{airportFee}</span>
-                                </div>
-                              )}
-                              <div className="flex justify-between text-slate-400">
-                                <span>Platform Svc Booking Fee</span>
-                                <span className={quote.provider === 'Namma Yatri' ? 'text-emerald-400 font-bold' : ''}>
-                                  {quote.provider === 'Namma Yatri' ? '₹0 (Direct to Driver!)' : `₹${platformFee}`}
-                                </span>
-                              </div>
-                              <div className="flex justify-between text-slate-400">
-                                <span>Government GST Tax (5%)</span>
-                                <span>₹{gst}</span>
-                              </div>
-                              <div className="border-t border-slate-800 pt-1.5 flex justify-between font-bold text-white text-[11px]">
-                                <span>Total Estimated Fare</span>
-                                <span className="text-emerald-400">₹{quote.fare}</span>
-                              </div>
-                              {quote.provider === 'Namma Yatri' && (
-                                <p className="text-[9px] text-emerald-400/90 leading-normal mt-1 bg-emerald-950/20 p-1.5 rounded border border-emerald-900/30">
-                                  ❤️ <strong>Zero Commisson Model:</strong> Your entire payment goes directly to the driver's bank account with zero platform cuts.
-                                </p>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
-              </div>
-
               {/* Console/Logs Realtime Feed (Live Telemetry Engine) */}
-              <div className="h-1/3 flex flex-col overflow-hidden bg-slate-950">
+              <div className="flex-1 flex flex-col overflow-hidden bg-slate-950 h-full">
                 <div className="bg-slate-900 border-b border-slate-800 flex items-center justify-between">
                   <div className="flex">
                     <button 

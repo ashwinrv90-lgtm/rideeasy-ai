@@ -41,6 +41,9 @@ const INDIA_PLACES_DB = [
   { id: 'ch_mc', name: 'Marina Beach', address: 'Kamabaraj Salai, Triplicane, Chennai, Tamil Nadu 600005', lat: 13.0500, lng: 80.2824, category: 'Landmark' },
   { id: 'ch_ct', name: 'Chennai Central Railway Station', address: 'Kannappar Thidal, Periyamet, Chennai, Tamil Nadu 600003', lat: 13.0822, lng: 80.2755, category: 'Railway' },
   { id: 'ch_dl', name: 'DLF IT Park Chennai', address: 'Mount Poonamallee Rd, Manapakkam, Chennai, Tamil Nadu 600125', lat: 13.0205, lng: 80.1654, category: 'Tech Park' },
+  { id: 'ch_koyambedu', name: 'Koyambedu Bus Terminus', address: 'Koyambedu, Chennai, Tamil Nadu 600107', lat: 13.0732, lng: 80.1912, category: 'Bus Station' },
+  { id: 'ch_velachery', name: 'Velachery', address: 'Velachery, Chennai, Tamil Nadu 600042', lat: 12.9792, lng: 80.2198, category: 'Residential' },
+  { id: 'ch_adyar', name: 'Adyar', address: 'Adyar, Chennai, Tamil Nadu 600020', lat: 13.0012, lng: 80.2565, category: 'Residential' },
   
   // Bangalore
   { id: 'bl_ap', name: 'Kempegowda International Airport (BLR)', address: 'Devanahalli, Bengaluru, Karnataka 560300', lat: 13.1986, lng: 77.7066, category: 'Airport' },
@@ -51,6 +54,11 @@ const INDIA_PLACES_DB = [
   { id: 'bl_or_hsr', name: 'HSR Layout Sector 1', address: 'HSR Layout, Bengaluru, Karnataka 560102', lat: 12.9116, lng: 77.6410, category: 'Residential' },
   { id: 'bl_or_ub', name: 'UB City Mall', address: 'Vittal Mallya Rd, KG Halli, Bengaluru, Karnataka 560001', lat: 12.9722, lng: 77.5958, category: 'Mall' },
   { id: 'bl_or_ind', name: 'Indiranagar Double Road', address: 'Indiranagar, Bengaluru, Karnataka 560038', lat: 12.9719, lng: 77.6412, category: 'Residential' },
+  { id: 'bl_junnasandra', name: 'Junnasandra', address: 'Junnasandra, Bengaluru, Karnataka 560035', lat: 12.9067, lng: 77.6826, category: 'Residential' },
+  { id: 'bl_sarjapur', name: 'Sarjapur Road', address: 'Sarjapur Rd, Bengaluru, Karnataka 560035', lat: 12.9114, lng: 77.6944, category: 'Residential' },
+  { id: 'bl_whitefield', name: 'Whitefield', address: 'Whitefield, Bengaluru, Karnataka 560066', lat: 12.9698, lng: 77.7499, category: 'Tech Park' },
+  { id: 'bl_ecity', name: 'Electronic City Phase 1', address: 'Electronic City, Bengaluru, Karnataka 560100', lat: 12.8452, lng: 77.6635, category: 'Tech Park' },
+  { id: 'bl_hebbal', name: 'Hebbal', address: 'Hebbal, Bengaluru, Karnataka 560024', lat: 13.0358, lng: 77.5970, category: 'Residential' },
 ];
 
 // Autocomplete logic using OpenStreetMap (OSM) Nominatim API restricted to India
@@ -61,18 +69,29 @@ app.get('/api/autocomplete', async (req, res) => {
   }
   
   try {
-    // Fetch from OpenStreetMap Nominatim Search API, restricted to India
+    // Fetch from OpenStreetMap Nominatim Search API, restricted to India with a 1500ms timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 1500);
+    
     const response = await fetch(
       `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query + ', India')}&format=json&countrycodes=in&addressdetails=1&limit=6`,
       {
+        signal: controller.signal,
         headers: {
           'User-Agent': 'RideEasy-Cab-Aggregator/1.0 (contact: ashwinrv90@gmail.com)'
         }
       }
     );
-    const data = (await response.json()) as any[];
     
-    if (data && data.length > 0) {
+    clearTimeout(timeoutId);
+    
+    if (!response.ok) {
+      throw new Error(`Nominatim returned status ${response.status}`);
+    }
+    
+    const data = (await response.json()) as any;
+    
+    if (data && Array.isArray(data) && data.length > 0) {
       const places = data.map((item: any) => {
         const parts = item.display_name.split(',');
         const name = parts[0].trim();
@@ -181,75 +200,259 @@ app.get('/api/place-details', async (req, res) => {
   res.status(404).json({ error: "Place not found" });
 });
 
+// Helper to detect city context from text or user preferences
+function detectCityContext(text: string, pName: string = '', dName: string = '', userPrefs: any = {}): string {
+  const combined = `${text} ${pName} ${dName}`.toLowerCase();
+  
+  if (combined.includes('bangalore') || combined.includes('bengaluru') || combined.includes('bellandur') || combined.includes('koramangala') || combined.includes('hsr') || combined.includes('manyata') || combined.includes('blr') || combined.includes('whitefield') || combined.includes('ecospace') || combined.includes('kempegowda') || combined.includes('indiranagar') || combined.includes('junnasandra') || combined.includes('sarjapur') || combined.includes('hebbal') || combined.includes('electronic city')) {
+    return 'bangalore';
+  }
+  if (combined.includes('chennai') || combined.includes('madras') || combined.includes('t nagar') || combined.includes('anna nagar') || combined.includes('velachery') || combined.includes('marina') || combined.includes('maa') || combined.includes('dlf') || combined.includes('meenambakkam') || combined.includes('phoenix') || combined.includes('koyambedu') || combined.includes('adyar')) {
+    return 'chennai';
+  }
+  if (combined.includes('delhi') || combined.includes('noida') || combined.includes('gurgaon') || combined.includes('gurugram')) {
+    return 'delhi';
+  }
+  if (combined.includes('mumbai') || combined.includes('bombay') || combined.includes('thane') || combined.includes('navi mumbai')) {
+    return 'mumbai';
+  }
+  if (combined.includes('kolkata') || combined.includes('calcutta') || combined.includes('howrah')) {
+    return 'kolkata';
+  }
+  if (combined.includes('hyderabad') || combined.includes('secunderabad') || combined.includes('gachibowli')) {
+    return 'hyderabad';
+  }
+  if (combined.includes('pune') || combined.includes('hinjewadi')) {
+    return 'pune';
+  }
+  if (combined.includes('ahmedabad')) {
+    return 'ahmedabad';
+  }
+  if (combined.includes('jaipur')) {
+    return 'jaipur';
+  }
+  if (combined.includes('goa')) {
+    return 'goa';
+  }
+
+  // Check saved preferences
+  const prefsStr = `${userPrefs.home || ''} ${userPrefs.office || ''}`.toLowerCase();
+  if (prefsStr.includes('chennai')) {
+    return 'chennai';
+  }
+  if (prefsStr.includes('bangalore') || prefsStr.includes('bengaluru')) {
+    return 'bangalore';
+  }
+
+  return 'bangalore'; // Default context
+}
+
+// In-memory cache to guarantee swift geocoding responses
+const GEOCODE_CACHE = new Map<string, { lat: number, lng: number, formattedAddress: string }>();
+
 // Helper function to resolve coordinates for any named place in India using OpenStreetMap
-async function resolveCoordinates(placeName: string): Promise<{ lat: number, lng: number, formattedAddress: string } | null> {
+async function resolveCoordinates(placeName: string, cityContext?: string): Promise<{ lat: number, lng: number, formattedAddress: string } | null> {
   if (!placeName) return null;
 
-  // Check pre-registered first
-  const preRegistered = INDIA_PLACES_DB.find(p => 
-    p.name.toLowerCase().includes(placeName.toLowerCase()) || 
+  const lowerName = placeName.toLowerCase().trim();
+  const cacheKey = `${lowerName}_${cityContext || ''}`;
+  if (GEOCODE_CACHE.has(cacheKey)) {
+    return GEOCODE_CACHE.get(cacheKey)!;
+  }
+
+  // 1. Precise Airport Mapping based on cityContext
+  if (lowerName === 'airport' || lowerName === 'air port' || lowerName.includes('international airport') || lowerName.endsWith(' airport') || lowerName.startsWith('airport ')) {
+    let city = cityContext || 'bangalore'; // Default to bangalore
+    if (lowerName.includes('bangalore') || lowerName.includes('bengaluru') || lowerName.includes('blr')) {
+      city = 'bangalore';
+    } else if (lowerName.includes('chennai') || lowerName.includes('maa') || lowerName.includes('madras')) {
+      city = 'chennai';
+    } else if (lowerName.includes('delhi') || lowerName.includes('del') || lowerName.includes('indira')) {
+      city = 'delhi';
+    } else if (lowerName.includes('mumbai') || lowerName.includes('bom') || lowerName.includes('chhatrapati')) {
+      city = 'mumbai';
+    }
+
+    let resultObj = null;
+    if (city === 'bangalore') {
+      resultObj = {
+        lat: 13.1986,
+        lng: 77.7066,
+        formattedAddress: 'Kempegowda International Airport (BLR)'
+      };
+    } else if (city === 'chennai') {
+      resultObj = {
+        lat: 12.9816,
+        lng: 80.1643,
+        formattedAddress: 'Chennai International Airport (MAA)'
+      };
+    } else if (city === 'delhi') {
+      resultObj = {
+        lat: 28.5562,
+        lng: 77.1000,
+        formattedAddress: 'Indira Gandhi International Airport (DEL)'
+      };
+    } else if (city === 'mumbai') {
+      resultObj = {
+        lat: 19.0896,
+        lng: 72.8656,
+        formattedAddress: 'Chhatrapati Shivaji Maharaj Airport (BOM)'
+      };
+    } else if (city === 'kolkata') {
+      resultObj = {
+        lat: 22.6547,
+        lng: 88.4467,
+        formattedAddress: 'Netaji Subhash Chandra Bose Airport (CCU)'
+      };
+    } else if (city === 'hyderabad') {
+      resultObj = {
+        lat: 17.2403,
+        lng: 78.4294,
+        formattedAddress: 'Rajiv Gandhi International Airport (HYD)'
+      };
+    } else if (city === 'pune') {
+      resultObj = {
+        lat: 18.5822,
+        lng: 73.9197,
+        formattedAddress: 'Pune Airport (PNQ)'
+      };
+    } else if (city === 'ahmedabad') {
+      resultObj = {
+        lat: 23.0772,
+        lng: 72.6347,
+        formattedAddress: 'Sardar Vallabhbhai Patel Airport (AMD)'
+      };
+    } else if (city === 'jaipur') {
+      resultObj = {
+        lat: 26.8242,
+        lng: 75.8122,
+        formattedAddress: 'Jaipur International Airport (JAI)'
+      };
+    } else if (city === 'goa') {
+      resultObj = {
+        lat: 15.3800,
+        lng: 73.8314,
+        formattedAddress: 'Dabolim Airport (GOI)'
+      };
+    }
+
+    if (resultObj) {
+      GEOCODE_CACHE.set(cacheKey, resultObj);
+      return resultObj;
+    }
+  }
+
+  // Check pre-registered first, matching the city context if available
+  const preRegistered = INDIA_PLACES_DB.find(p => {
+    const isNameMatch = p.name.toLowerCase().includes(lowerName) || 
+                        p.id === placeName ||
+                        lowerName.includes(p.name.toLowerCase());
+    if (!isNameMatch) return false;
+    
+    // If we have a cityContext, prefer matching places in that city
+    if (cityContext === 'bangalore' && !p.id.startsWith('bl_')) return false;
+    if (cityContext === 'chennai' && !p.id.startsWith('ch_')) return false;
+    
+    return true;
+  }) || INDIA_PLACES_DB.find(p => 
+    p.name.toLowerCase().includes(lowerName) || 
     p.id === placeName ||
-    placeName.toLowerCase().includes(p.name.toLowerCase())
+    lowerName.includes(p.name.toLowerCase())
   );
+
   if (preRegistered) {
-    return {
+    const resultObj = {
       lat: preRegistered.lat,
       lng: preRegistered.lng,
       formattedAddress: preRegistered.name
     };
+    GEOCODE_CACHE.set(cacheKey, resultObj);
+    return resultObj;
+  }
+
+  let searchQuery = placeName;
+  if (cityContext) {
+    const citySuffix = cityContext === 'bangalore' ? 'Bengaluru, Karnataka' :
+                       cityContext === 'chennai' ? 'Chennai, Tamil Nadu' :
+                       cityContext === 'delhi' ? 'Delhi' :
+                       cityContext === 'mumbai' ? 'Mumbai, Maharashtra' :
+                       cityContext === 'kolkata' ? 'Kolkata, West Bengal' :
+                       cityContext === 'hyderabad' ? 'Hyderabad, Telangana' :
+                       cityContext === 'pune' ? 'Pune, Maharashtra' :
+                       cityContext === 'ahmedabad' ? 'Ahmedabad, Gujarat' :
+                       cityContext === 'jaipur' ? 'Jaipur, Rajasthan' :
+                       cityContext === 'goa' ? 'Goa' : '';
+    
+    if (citySuffix && !placeName.toLowerCase().includes(citySuffix.split(',')[0].toLowerCase())) {
+      searchQuery = `${placeName}, ${citySuffix}`;
+    }
   }
 
   // OpenStreetMap Nominatim Search API
   try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 600); // Super-quick 600ms timeout to prevent user waiting if OSM blocks or rate-limits us
+    
     const response = await fetch(
-      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(placeName + ', India')}&format=json&countrycodes=in&limit=1`,
+      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(searchQuery + ', India')}&format=json&countrycodes=in&limit=1`,
       {
+        signal: controller.signal,
         headers: {
           'User-Agent': 'RideEasy-Cab-Aggregator/1.0 (contact: ashwinrv90@gmail.com)'
         }
       }
     );
-    const data = (await response.json()) as any[];
-    if (data && data[0]) {
-      return {
-        lat: parseFloat(data[0].lat),
-        lng: parseFloat(data[0].lon),
-        formattedAddress: data[0].display_name
-      };
+    
+    clearTimeout(timeoutId);
+    
+    if (response.ok) {
+      const data = (await response.json()) as any;
+      if (data && Array.isArray(data) && data[0]) {
+        const resultObj = {
+          lat: parseFloat(data[0].lat),
+          lng: parseFloat(data[0].lon),
+          formattedAddress: data[0].display_name
+        };
+        GEOCODE_CACHE.set(cacheKey, resultObj);
+        return resultObj;
+      }
     }
   } catch (err) {
-    console.error("OpenStreetMap Geocoding Error for", placeName, err);
+    console.error("OpenStreetMap Geocoding Error for", searchQuery, err);
   }
 
-  // Fallback high-fidelity smart offset estimation for cities in India
-  let lat = 20.5937;
-  let lng = 78.9629;
-  const lowerName = placeName.toLowerCase();
+  // Fallback high-fidelity smart offset estimation within detected city context
+  const hash = placeName.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
   
-  if (lowerName.includes('delhi')) { lat = 28.7041; lng = 77.1025; }
-  else if (lowerName.includes('mumbai') || lowerName.includes('bombay')) { lat = 19.0760; lng = 72.8777; }
-  else if (lowerName.includes('kolkata') || lowerName.includes('calcutta')) { lat = 22.5726; lng = 88.3639; }
-  else if (lowerName.includes('chennai') || lowerName.includes('madras')) { lat = 13.0827; lng = 80.2707; }
-  else if (lowerName.includes('bangalore') || lowerName.includes('bengaluru')) { lat = 12.9716; lng = 77.5946; }
-  else if (lowerName.includes('hyderabad')) { lat = 17.3850; lng = 78.4867; }
-  else if (lowerName.includes('pune')) { lat = 18.5204; lng = 73.8567; }
-  else if (lowerName.includes('ahmedabad')) { lat = 23.0225; lng = 72.5714; }
-  else if (lowerName.includes('jaipur')) { lat = 26.9124; lng = 75.7873; }
-  else if (lowerName.includes('goa')) { lat = 15.2993; lng = 74.1240; }
-  else if (lowerName.includes('kochi') || lowerName.includes('cochin')) { lat = 9.9312; lng = 76.2673; }
-  else if (lowerName.includes('gurgaon') || lowerName.includes('gurugram')) { lat = 28.4595; lng = 77.0266; }
-  else if (lowerName.includes('noida')) { lat = 28.5355; lng = 77.3910; }
-  else {
-    const hash = placeName.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-    lat = 11.0 + (hash % 16); 
-    lng = 72.0 + (hash % 15);
-  }
+  let lat = 12.9716;
+  let lng = 77.5946; // Default Bangalore
+  const city = cityContext || 'bangalore';
+  
+  if (city === 'delhi') { lat = 28.7041; lng = 77.1025; }
+  else if (city === 'mumbai') { lat = 19.0760; lng = 72.8777; }
+  else if (city === 'kolkata') { lat = 22.5726; lng = 88.3639; }
+  else if (city === 'chennai') { lat = 13.0827; lng = 80.2707; }
+  else if (city === 'bangalore') { lat = 12.9716; lng = 77.5946; }
+  else if (city === 'hyderabad') { lat = 17.3850; lng = 78.4867; }
+  else if (city === 'pune') { lat = 18.5204; lng = 73.8567; }
+  else if (city === 'ahmedabad') { lat = 23.0225; lng = 72.5714; }
+  else if (city === 'jaipur') { lat = 26.9124; lng = 75.7873; }
+  else if (city === 'goa') { lat = 15.2993; lng = 74.1240; }
+  
+  // High fidelity minor offset within city boundaries to keep routes realistic (max ±8.8km offset)
+  const latOffset = ((hash % 100) - 50) / 600;
+  const lngOffset = (((hash >> 2) % 100) - 50) / 600;
+  
+  lat = lat + latOffset;
+  lng = lng + lngOffset;
 
-  return {
+  const resultObj = {
     lat: parseFloat(lat.toFixed(4)),
     lng: parseFloat(lng.toFixed(4)),
     formattedAddress: placeName.replace(/\b\w/g, c => c.toUpperCase())
   };
+  GEOCODE_CACHE.set(cacheKey, resultObj);
+  return resultObj;
 }
 
 // Main chat route that uses Gemini to parse WhatsApp Conversational Intents
@@ -290,26 +493,25 @@ app.post('/api/chat', async (req, res) => {
     const text = msg.toLowerCase();
     const parsed = { ...prevParsed };
     
-    // Simple state-dependent or direct extraction
-    // If we've got nothing, check if the input specifies "X to Y"
-    const toFromRegex = /(?:from\s+)?(.+?)\s+to\s+(.+)/i;
-    const match = text.match(toFromRegex);
-    if (match) {
-      parsed.pickup = match[1].trim();
-      parsed.dropoff = match[2].trim();
-    } else {
-      // Step-by-step user input parsing
-      if (!parsed.pickup) {
-        // If message is not empty and we need pickup, treat message as pickup
-        parsed.pickup = msg.trim();
-      } else if (!parsed.dropoff) {
-        parsed.dropoff = msg.trim();
-      } else if (parsed.passengers === null) {
-        // Extract numbers from message
-        const numMatch = text.match(/\b([1-9])\b/);
+    // 1. Extract passenger count from the entire message if not already set
+    if (parsed.passengers === null) {
+      const passengerRegexes = [
+        /(\d+)\s*(?:people|person|passenger|member|traveler|pax|seat|members)/i,
+        /for\s+(\d+)\s*(?:people|person|passenger|member|traveler|pax|seat|members)?/i,
+        /\b([1-6])\s*(?:people|person|passenger|member|traveler|pax|seat|members)?\b/i
+      ];
+      for (const regex of passengerRegexes) {
+        const numMatch = text.match(regex);
         if (numMatch) {
-          parsed.passengers = parseInt(numMatch[1]);
-        } else if (text.includes('one') || text.includes('single') || text.includes('myself') || text.includes('just me')) {
+          const num = parseInt(numMatch[1]);
+          if (num >= 1 && num <= 6) {
+            parsed.passengers = num;
+            break;
+          }
+        }
+      }
+      if (parsed.passengers === null) {
+        if (text.includes('one') || text.includes('single') || text.includes('myself') || text.includes('just me') || text.includes('solo')) {
           parsed.passengers = 1;
         } else if (text.includes('two') || text.includes('couple') || text.includes('both')) {
           parsed.passengers = 2;
@@ -318,49 +520,70 @@ app.post('/api/chat', async (req, res) => {
         } else if (text.includes('four') || text.includes('group') || text.includes('family')) {
           parsed.passengers = 4;
         }
-      } else if (!parsed.date) {
-        // Advanced date/time extraction supporting IST format (AM/PM)
-        let extractedDate: string | null = null;
-        let extractedTime: string | null = null;
+      }
+    }
 
-        if (text.includes('today')) {
-          extractedDate = 'Today';
-        } else if (text.includes('tomorrow')) {
-          extractedDate = 'Tomorrow';
-        } else {
-          const dateMatch = text.match(/(\d{1,2})[\/\-](\d{1,2})([\/\-]\d{2,4})?/);
-          if (dateMatch) {
-            extractedDate = dateMatch[0];
-          }
-        }
+    // 2. Extract Date and Time schedule from the entire message
+    let extractedDate: string | null = null;
+    let extractedTime: string | null = null;
 
-        const timeMatch = text.match(/(\d{1,2})([\s:]*(\d{2}))?\s*(am|pm)/i);
-        if (timeMatch) {
-          const hh = timeMatch[1].padStart(2, '0');
-          const mm = timeMatch[3] ? timeMatch[3] : '00';
-          const period = timeMatch[4].toUpperCase();
-          extractedTime = `${hh}:${mm} ${period}`;
-        }
+    if (text.includes('today')) {
+      extractedDate = 'Today';
+    } else if (text.includes('tomorrow') || text.includes('tommorow')) {
+      extractedDate = 'Tomorrow';
+    } else {
+      const dateMatch = text.match(/(\d{1,2})[\/\-](\d{1,2})([\/\-]\d{2,4})?/);
+      if (dateMatch) {
+        extractedDate = dateMatch[0];
+      }
+    }
 
-        if (extractedDate && extractedTime) {
-          parsed.date = extractedDate;
-          parsed.time = extractedTime;
-        } else if (extractedDate && !extractedTime) {
-          parsed.date = extractedDate;
-          parsed.time = '10:00 AM'; // Default fallback time if only date specified
-        } else if (!extractedDate && extractedTime) {
-          parsed.date = 'Today';
-          parsed.time = extractedTime;
-        } else {
-          if (text.includes('now') || text.includes('immediate') || text.includes('current')) {
-            parsed.date = 'Today';
-            parsed.time = 'Now';
-          } else if (text.includes('later') || text.includes('schedule')) {
-            // Keep them null so we prompt for IST date and time
-            parsed.date = null;
-            parsed.time = null;
-          }
-        }
+    // Capture standard Indian time formats like "10 am", "10:30 am", "5:00 pm", "5 pm", "10am", "10pm"
+    const timeMatch = text.match(/(\d{1,2})(?:[\s:]*(\d{2}))?\s*(am|pm)/i);
+    if (timeMatch) {
+      const hh = timeMatch[1].padStart(2, '0');
+      const mm = timeMatch[2] ? timeMatch[2] : '00';
+      const period = timeMatch[3].toUpperCase();
+      extractedTime = `${hh}:${mm} ${period}`;
+    }
+
+    if (extractedDate && extractedTime) {
+      parsed.date = extractedDate;
+      parsed.time = extractedTime;
+    } else if (extractedDate && !extractedTime) {
+      parsed.date = extractedDate;
+      if (!parsed.time) parsed.time = '10:00 AM'; // Default fallback time if only date specified
+    } else if (!extractedDate && extractedTime) {
+      if (!parsed.date) parsed.date = 'Today';
+      parsed.time = extractedTime;
+    } else {
+      if (text.includes('now') || text.includes('immediate') || text.includes('current')) {
+        parsed.date = 'Today';
+        parsed.time = 'Now';
+      }
+    }
+
+    // 3. Clean up travel details (passengers, dates, times) from raw text to avoid corrupting location names
+    let cleanTextForLocations = text
+      .replace(/\b(?:tomorrow|tommorow|today|yesterday|now|at|for)\b/gi, '')
+      .replace(/\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\b/gi, '')
+      .replace(/\b\d+\s*(?:people|person|passenger|member|traveler|pax|seat|members)?\b/gi, '')
+      .replace(/\b(?:one|two|three|four|five|six)\s*(?:people|person|passenger|member|traveler|pax|seat|members)?\b/gi, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    // 4. Extract location parameters (pickup/dropoff) from clean text
+    const toFromRegex = /(?:from\s+)?(.+?)\s+to\s+(.+)/i;
+    const match = cleanTextForLocations.match(toFromRegex);
+    if (match) {
+      parsed.pickup = match[1].trim();
+      parsed.dropoff = match[2].trim();
+    } else {
+      // Step-by-step user input parsing
+      if (!parsed.pickup) {
+        parsed.pickup = cleanTextForLocations;
+      } else if (!parsed.dropoff) {
+        parsed.dropoff = cleanTextForLocations;
       }
     }
 
@@ -377,10 +600,9 @@ app.post('/api/chat', async (req, res) => {
     // Auto-decide mode based on passenger count if passengers entered
     if (parsed.passengers !== null) {
       if (parsed.passengers === 1) {
-        // Start with taxi or auto mode as default even for 1 person, but bike is allowed
         parsed.rideType = 'cab';
       } else if (parsed.passengers <= 3) {
-        parsed.rideType = 'cab'; // auto or cab, default cab
+        parsed.rideType = 'cab';
       } else {
         parsed.rideType = 'suv';
       }
@@ -395,16 +617,24 @@ app.post('/api/chat', async (req, res) => {
     }
 
     // Geocode what we can
+    let cityContext = detectCityContext(text, parsed.pickup || '', parsed.dropoff || '', userPreferences);
     if (parsed.pickup && !parsed.pickupLat) {
-      const pCoords = await resolveCoordinates(parsed.pickup);
+      const pCoords = await resolveCoordinates(parsed.pickup, cityContext);
       if (pCoords) {
         parsed.pickup = pCoords.formattedAddress;
         parsed.pickupLat = pCoords.lat;
         parsed.pickupLng = pCoords.lng;
+        
+        // Dynamically refine cityContext based on resolved pickup coordinates!
+        if (pCoords.lat >= 12.7 && pCoords.lat <= 13.3 && pCoords.lng >= 77.3 && pCoords.lng <= 77.9) {
+          cityContext = 'bangalore';
+        } else if (pCoords.lat >= 12.8 && pCoords.lat <= 13.3 && pCoords.lng >= 80.0 && pCoords.lng <= 80.4) {
+          cityContext = 'chennai';
+        }
       }
     }
     if (parsed.dropoff && !parsed.dropoffLat) {
-      const dCoords = await resolveCoordinates(parsed.dropoff);
+      const dCoords = await resolveCoordinates(parsed.dropoff, cityContext);
       if (dCoords) {
         parsed.dropoff = dCoords.formattedAddress;
         parsed.dropoffLat = dCoords.lat;
@@ -459,7 +689,8 @@ You MUST support ANY location, landmark, city, hotel, tech park, address, or sta
 Extract the user's starting point (pickup) and destination (dropoff) names.
 
 CRITICAL OBJECTIVE:
-We must guide the user step-by-step in a friendly conversational manner, ONE BY ONE:
+We guide the user step-by-step in a friendly conversational manner, but if the user provides multiple travel details in a single message (e.g. "from bellandur to airport tomorrow 10 am for 3 people"), you MUST extract ALL of them at once (pickup, dropoff, date, time, passengers) to populate the parsedState! Do NOT ignore any details.
+The standard sequence is:
 1. Pickup location (From)
 2. Dropoff location (To)
 3. Number of passengers (How many members?)
@@ -472,9 +703,9 @@ We must guide the user step-by-step in a friendly conversational manner, ONE BY 
    - If they specify "later" or "schedule", but have NOT provided a specific date and time:
      - Keep "date" and "time" as null in parsedState (so the stage remains "need_datetime").
      - Your reply MUST ask for the date and time in IST format with AM/PM (e.g. "Please provide your travel date (e.g., *Today*, *Tomorrow*, or any date) and time in IST format with *AM/PM* option (e.g., *10:30 AM* or *05:15 PM*) to schedule. 📅").
-   - If they provide a date and time (e.g. "tomorrow 10:30 AM" or "today 5 PM" or "15/07/2026 at 9:00 PM"), extract them cleanly (e.g. date: "Tomorrow" or "15/07/2026", time: "10:30 AM" or "09:00 PM" with AM/PM option).
+   - If they provide a date and time (e.g. "tomorrow 10:30 AM" or "today 5 PM" or "tomorrow 10 am" or "15/07/2026 at 9:00 PM"), extract them cleanly (e.g. date: "Tomorrow" or "15/07/2026", time: "10:00 AM" or "09:00 PM" with AM/PM option). Support typos like "tommorow".
 
-Keep conversational replies highly concise, Indian WhatsApp-style, using bold markdown for emphasis (e.g. *Mumbai Airport*). Always request ONLY the next missing item in the sequence. If the user overrides or changes any previous information, support that modification dynamically!
+Keep conversational replies highly concise, Indian WhatsApp-style, using bold markdown for emphasis (e.g. *Mumbai Airport*). Always request ONLY the next missing item in the sequence. If the user overrides or changes any previous information, support that modification dynamically! If all details are present, set the stage to "quoting".
 
 User Preferences:
 - Home Saved Place: ${userPreferences.home || 'Anna Nagar West'}
@@ -492,6 +723,9 @@ Identify matching destinations from our registered location database if applicab
 - "Marina Beach" -> id "ch_mc"
 - "Chennai Central Railway Station" -> id "ch_ct"
 - "DLF IT Park Chennai" -> id "ch_dl"
+- "Koyambedu Bus Terminus" -> id "ch_koyambedu"
+- "Velachery" -> id "ch_velachery"
+- "Adyar" -> id "ch_adyar"
 - "Kempegowda International Airport (BLR)" -> id "bl_ap"
 - "M.G. Road Metro Station" -> id "bl_mg"
 - "Manyata Tech Park" -> id "bl_or"
@@ -500,6 +734,15 @@ Identify matching destinations from our registered location database if applicab
 - "HSR Layout Sector 1" -> id "bl_or_hsr"
 - "UB City Mall" -> id "bl_or_ub"
 - "Indiranagar Double Road" -> id "bl_or_ind"
+- "Junnasandra" -> id "bl_junnasandra"
+- "Sarjapur Road" -> id "bl_sarjapur"
+- "Whitefield" -> id "bl_whitefield"
+- "Electronic City Phase 1" -> id "bl_ecity"
+- "Hebbal" -> id "bl_hebbal"
+
+CLARIFICATION AND SWIFTNESS DIRECTIVES:
+1. If the user's message is ambiguous, unclear, or incomplete (e.g. "take me there", "go", or they specify a location that makes no sense, or they say "airport" but we have no city context yet to decide if they mean Bangalore or Chennai airport), DO NOT make a guess. Instead, set the corresponding parsedState field (like pickup or dropoff) to null, and in your "reply", ask the user specifically and politely to clarify or provide that detail again (e.g., "Could you please specify which airport? Bengaluru (BLR) or Chennai (MAA)? ✈️").
+2. Keep your conversational responses exceptionally swift, friendly, and natural. Use the list of registered landmarks to guide them!
 
 Respond strictly with a JSON object. Do not output markdown code blocks other than the raw JSON itself, conforming to the following JSON structure:
 {
@@ -560,21 +803,113 @@ Ensure the "stage" matches the first missing item in the sequence:
     const text = response.text || "{}";
     const parsedJson = JSON.parse(text.trim());
 
-    // Resolve exact geocoded coordinates for any custom location
-    if (parsedJson.parsedState?.pickup) {
-      const pCoords = await resolveCoordinates(parsedJson.parsedState.pickup);
+    // Resolve exact geocoded coordinates for any custom location, but ONLY if we don't have them yet or if the location text changed!
+    if (parsedJson.parsedState) {
+      let cityContext = detectCityContext(message, parsedJson.parsedState.pickup || '', parsedJson.parsedState.dropoff || '', userPreferences);
+      const oldPickup = parsedState?.pickup;
+      const oldPickupLat = parsedState?.pickupLat;
+      const oldPickupLng = parsedState?.pickupLng;
+      const newPickup = parsedJson.parsedState.pickup;
+
+      let resolvedPickupLat = oldPickupLat;
+      let resolvedPickupLng = oldPickupLng;
+
+      let pickupPromise = Promise.resolve<any>(null);
+      let dropoffPromise = Promise.resolve<any>(null);
+
+      if (newPickup) {
+        // If the location matches the old one and we already have coordinates, keep them!
+        if (oldPickup && oldPickupLat && oldPickupLng && 
+            (newPickup.toLowerCase() === oldPickup.toLowerCase() || 
+             oldPickup.toLowerCase().includes(newPickup.toLowerCase()) || 
+             newPickup.toLowerCase().includes(oldPickup.toLowerCase()))) {
+          parsedJson.parsedState.pickup = oldPickup;
+          parsedJson.parsedState.pickupLat = oldPickupLat;
+          parsedJson.parsedState.pickupLng = oldPickupLng;
+          resolvedPickupLat = oldPickupLat;
+          resolvedPickupLng = oldPickupLng;
+        } else {
+          // Changed or new location, prepare resolve promise
+          pickupPromise = resolveCoordinates(newPickup, cityContext);
+        }
+      }
+
+      const oldDropoff = parsedState?.dropoff;
+      const oldDropoffLat = parsedState?.dropoffLat;
+      const oldDropoffLng = parsedState?.dropoffLng;
+      const newDropoff = parsedJson.parsedState.dropoff;
+
+      if (newDropoff) {
+        // If the location matches the old one and we already have coordinates, keep them!
+        if (oldDropoff && oldDropoffLat && oldDropoffLng && 
+            (newDropoff.toLowerCase() === oldDropoff.toLowerCase() || 
+             oldDropoff.toLowerCase().includes(newDropoff.toLowerCase()) || 
+             newDropoff.toLowerCase().includes(oldDropoff.toLowerCase()))) {
+          parsedJson.parsedState.dropoff = oldDropoff;
+          parsedJson.parsedState.dropoffLat = oldDropoffLat;
+          parsedJson.parsedState.dropoffLng = oldDropoffLng;
+        } else {
+          // Changed or new location, prepare resolve promise
+          dropoffPromise = resolveCoordinates(newDropoff, cityContext);
+        }
+      }
+
+      // Execute both geocoding requests in parallel to optimize load times!
+      let [pCoords, dCoords] = await Promise.all([pickupPromise, dropoffPromise]);
+
       if (pCoords) {
         parsedJson.parsedState.pickup = pCoords.formattedAddress;
         parsedJson.parsedState.pickupLat = pCoords.lat;
         parsedJson.parsedState.pickupLng = pCoords.lng;
+        resolvedPickupLat = pCoords.lat;
+        resolvedPickupLng = pCoords.lng;
       }
-    }
-    if (parsedJson.parsedState?.dropoff) {
-      const dCoords = await resolveCoordinates(parsedJson.parsedState.dropoff);
+
       if (dCoords) {
         parsedJson.parsedState.dropoff = dCoords.formattedAddress;
         parsedJson.parsedState.dropoffLat = dCoords.lat;
         parsedJson.parsedState.dropoffLng = dCoords.lng;
+      }
+
+      // SMART CORRECTION: If pickup and dropoff resolved in different cities, align them!
+      // (Unless the user explicitly typed the city name in the query to denote a long-distance cross-city trip)
+      const activePickupLat = parsedJson.parsedState.pickupLat || resolvedPickupLat;
+      const activePickupLng = parsedJson.parsedState.pickupLng || resolvedPickupLng;
+      const activeDropoffLat = parsedJson.parsedState.dropoffLat;
+      const activeDropoffLng = parsedJson.parsedState.dropoffLng;
+
+      if (activePickupLat && activePickupLng && activeDropoffLat && activeDropoffLng) {
+        const pIsBangalore = activePickupLat >= 12.7 && activePickupLat <= 13.3 && activePickupLng >= 77.3 && activePickupLng <= 77.9;
+        const pIsChennai = activePickupLat >= 12.8 && activePickupLat <= 13.3 && activePickupLng >= 80.0 && activePickupLng <= 80.4;
+        const dIsBangalore = activeDropoffLat >= 12.7 && activeDropoffLat <= 13.3 && activeDropoffLng >= 77.3 && activeDropoffLng <= 77.9;
+        const dIsChennai = activeDropoffLat >= 12.8 && activeDropoffLat <= 13.3 && activeDropoffLng >= 80.0 && activeDropoffLng <= 80.4;
+
+        if (pIsBangalore && dIsChennai && !message.toLowerCase().includes('chennai')) {
+          // Force dropoff to resolve inside Bangalore context
+          const correctedDrop = await resolveCoordinates(newDropoff || parsedJson.parsedState.dropoff || '', 'bangalore');
+          if (correctedDrop) {
+            parsedJson.parsedState.dropoff = correctedDrop.formattedAddress;
+            parsedJson.parsedState.dropoffLat = correctedDrop.lat;
+            parsedJson.parsedState.dropoffLng = correctedDrop.lng;
+          }
+        } else if (pIsChennai && dIsBangalore && !message.toLowerCase().includes('bangalore') && !message.toLowerCase().includes('bengaluru')) {
+          // Force dropoff to resolve inside Chennai context
+          const correctedDrop = await resolveCoordinates(newDropoff || parsedJson.parsedState.dropoff || '', 'chennai');
+          if (correctedDrop) {
+            parsedJson.parsedState.dropoff = correctedDrop.formattedAddress;
+            parsedJson.parsedState.dropoffLat = correctedDrop.lat;
+            parsedJson.parsedState.dropoffLng = correctedDrop.lng;
+          }
+        }
+      }
+
+      // Dynamically refine cityContext based on resolved pickup coordinates (for logging / telemetry)
+      if (resolvedPickupLat && resolvedPickupLng) {
+        if (resolvedPickupLat >= 12.7 && resolvedPickupLat <= 13.3 && resolvedPickupLng >= 77.3 && resolvedPickupLng <= 77.9) {
+          cityContext = 'bangalore';
+        } else if (resolvedPickupLat >= 12.8 && resolvedPickupLat <= 13.3 && resolvedPickupLng >= 80.0 && resolvedPickupLng <= 80.4) {
+          cityContext = 'chennai';
+        }
       }
     }
 
