@@ -2297,6 +2297,8 @@ export default function App() {
                               const isBestPrice = quote.fare === Math.min(...filteredList.map(q => q.fare));
                               const isFastest = quote.etaMinutes === Math.min(...filteredList.map(q => q.etaMinutes));
 
+                              const isBestValue = !!(badge && badge.includes('Recommended'));
+
                               const isExpanded = expandedQuoteId === quote.id;
 
                               const isAirport = !!(parsedState.pickup?.toLowerCase().includes('airport') || parsedState.dropoff?.toLowerCase().includes('airport'));
@@ -2319,7 +2321,11 @@ export default function App() {
                               return (
                                 <div 
                                   key={quote.id}
-                                  className="bg-[#111b21] border border-slate-800/80 rounded-xl p-3 shadow-md hover:border-slate-700 transition text-[#e9edef] space-y-2.5 text-left"
+                                  className={`rounded-xl p-3 shadow-md transition text-[#e9edef] space-y-2.5 text-left relative ${
+                                    isBestValue 
+                                      ? 'bg-[#12231c] border border-emerald-500/60 shadow-[0_0_15px_rgba(16,185,129,0.15)] ring-1 ring-emerald-500/10' 
+                                      : 'bg-[#111b21] border border-slate-800/80 hover:border-slate-700'
+                                  }`}
                                 >
                                   {/* Top Line: Provider and Badge */}
                                   <div className="flex items-start justify-between">
@@ -2359,9 +2365,13 @@ export default function App() {
 
                                   {/* Badges and Reasons */}
                                   {badge && (
-                                    <div className="flex items-center space-x-1.5 bg-[#1f2c34]/50 px-2 py-1 rounded border border-slate-800/30">
+                                    <div className={`flex items-center space-x-1.5 px-2 py-1 rounded border ${
+                                      isBestValue 
+                                        ? 'bg-emerald-950/40 border-emerald-500/30' 
+                                        : 'bg-[#1f2c34]/50 border-slate-800/30'
+                                    }`}>
                                       <span className={`text-[8px] font-extrabold uppercase px-1 rounded ${
-                                        badge.includes('Recommended') ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' :
+                                        badge.includes('Recommended') ? 'bg-emerald-500 text-slate-950 font-black' :
                                         badge.includes('Cheapest') ? 'bg-yellow-950 text-yellow-400 border border-yellow-800' :
                                         'bg-blue-950 text-blue-400 border border-blue-800'
                                       }`}>
@@ -2390,7 +2400,11 @@ export default function App() {
                                       </button>
                                       <button 
                                         onClick={() => handleRedirect(quote)}
-                                        className="bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white font-bold px-2.5 py-1 rounded text-[10px] transition flex items-center space-x-1 cursor-pointer"
+                                        className={`active:scale-95 text-white font-bold px-2.5 py-1 rounded text-[10px] transition flex items-center space-x-1 cursor-pointer ${
+                                          isBestValue 
+                                            ? 'bg-emerald-500 hover:bg-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.4)]' 
+                                            : 'bg-emerald-600 hover:bg-emerald-500'
+                                        }`}
                                       >
                                         <span>Book Now</span>
                                         <ExternalLink className="w-2.5 h-2.5" />
