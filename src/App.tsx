@@ -129,10 +129,36 @@ export default function App() {
   // Custom expandable billing breakdown details state for selected quote card
   const [expandedQuoteId, setExpandedQuoteId] = useState<string | null>(null);
 
+  // Inline editing within chatbot states
+  const [chatEditingIndex, setChatEditingIndex] = useState<number | null>(null);
+  const [draftPickup, setDraftPickup] = useState<string>('');
+  const [draftPickupLat, setDraftPickupLat] = useState<number | null>(null);
+  const [draftPickupLng, setDraftPickupLng] = useState<number | null>(null);
+  const [draftDropoff, setDraftDropoff] = useState<string>('');
+  const [draftDropoffLat, setDraftDropoffLat] = useState<number | null>(null);
+  const [draftDropoffLng, setDraftDropoffLng] = useState<number | null>(null);
+  const [draftPassengers, setDraftPassengers] = useState<number>(1);
+  const [draftDate, setDraftDate] = useState<string>('Today');
+  const [draftTime, setDraftTime] = useState<string>('Now');
+
   const chatContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (chatContainerRef.current) {
+    // If the last message contains quotes, scroll to the top of the latest recommendation message
+    const lastMsg = chatHistory[chatHistory.length - 1];
+    if (lastMsg && lastMsg.quotes && lastMsg.quotes.length > 0) {
+      setTimeout(() => {
+        const element = document.getElementById('latest-recommendation');
+        if (element) {
+          element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        } else if (chatContainerRef.current) {
+          chatContainerRef.current.scrollTo({
+            top: chatContainerRef.current.scrollHeight,
+            behavior: 'smooth'
+          });
+        }
+      }, 150);
+    } else if (chatContainerRef.current) {
       chatContainerRef.current.scrollTo({
         top: chatContainerRef.current.scrollHeight,
         behavior: 'smooth'
@@ -1978,152 +2004,438 @@ export default function App() {
                       )}
 
                       {chat.quotes && chat.quotes.length > 0 && (
-                        <div className="mt-3 space-y-3 pt-3 border-t border-slate-700/50">
-                          {getSortedAndFilteredQuotesForList(chat.quotes || []).map((quote) => {
-                            const filteredList = getSortedAndFilteredQuotesForList(chat.quotes || []);
-                            const { badge, reason } = getQuoteBadgeAndReason(quote, filteredList);
-                            
-                            const isBestPrice = quote.fare === Math.min(...filteredList.map(q => q.fare));
-                            const isFastest = quote.etaMinutes === Math.min(...filteredList.map(q => q.etaMinutes));
+                        <div 
+                          id={idx === chatHistory.length - 1 ? "latest-recommendation" : undefined}
+                          className="mt-3 space-y-3 pt-3 border-t border-slate-700/50"
+                        >
+                          {/* 1. Trip Parameters Inline Editor Box */}
+                          <div className="bg-[#182229] border border-slate-700/50 rounded-xl p-3 mb-3 space-y-2 text-left">
+                            <div className="flex items-center justify-between border-b border-slate-700/50 pb-2">
+                              <span className="text-[10px] uppercase font-bold text-slate-300 tracking-wider flex items-center space-x-1">
+                                <span>🗺️ Trip Parameters</span>
+                              </span>
+                              {chatEditingIndex !== idx ? (
+                                <button 
+                                  onClick={() => {
+                                    setChatEditingIndex(idx);
+                                    setDraftPickup(parsedState.pickup || '');
+                                    setDraftPickupLat(parsedState.pickupLat || null);
+                                    setDraftPickupLng(parsedState.pickupLng || null);
+                                    setDraftDropoff(parsedState.dropoff || '');
+                                    setDraftDropoffLat(parsedState.dropoffLat || null);
+                                    setDraftDropoffLng(parsedState.dropoffLng || null);
+                                    setDraftPassengers(parsedState.passengers || 1);
+                                    setDraftDate(parsedState.date || 'Today');
+                                    setDraftTime(parsedState.time || 'Now');
+                                    setPickupInput(parsedState.pickup || '');
+                                    setDropoffInput(parsedState.dropoff || '');
+                                  }}
+                                  className="text-[10px] text-emerald-400 hover:text-emerald-300 font-bold flex items-center space-x-1 cursor-pointer"
+                                >
+                                  <span>✏️ Edit Trip</span>
+                                </button>
+                              ) : (
+                                <button 
+                                  onClick={() => {
+                                    setChatEditingIndex(null);
+                                    setPickupSuggestions([]);
+                                    setDropoffSuggestions([]);
+                                  }}
+                                  className="text-[10px] text-red-400 hover:text-red-300 font-bold cursor-pointer"
+                                >
+                                  Cancel
+                                </button>
+                              )}
+                            </div>
 
-                            const isExpanded = expandedQuoteId === quote.id;
-
-                            const isAirport = !!(parsedState.pickup?.toLowerCase().includes('airport') || parsedState.dropoff?.toLowerCase().includes('airport'));
-                            const airportFee = isAirport ? 100 : 0;
-                            
-                            let platformFee = 15;
-                            if (quote.provider === 'Namma Yatri') platformFee = 0;
-                            else if (quote.provider === 'Rapido') platformFee = 10;
-                            else if (quote.provider === 'Ola') platformFee = 20;
-
-                            const gst = Math.round(quote.fare * 0.0476);
-                            
-                            let baseFee = 30;
-                            if (quote.category === 'bike') baseFee = 15;
-                            else if (quote.category === 'auto') baseFee = 25;
-                            else if (quote.category === 'suv') baseFee = 60;
-
-                            const distanceCharge = Math.max(0, quote.fare - airportFee - platformFee - gst - baseFee);
-
-                            return (
-                              <div 
-                                key={quote.id}
-                                className="bg-[#111b21] border border-slate-800/80 rounded-xl p-3 shadow-md hover:border-slate-700 transition text-[#e9edef] space-y-2.5 text-left"
-                              >
-                                {/* Top Line: Provider and Badge */}
-                                <div className="flex items-start justify-between">
-                                  <div className="flex items-center space-x-2">
-                                    <div className={`px-2 py-1 rounded text-center font-black text-[10px] ${
-                                      quote.provider === 'Uber' ? 'bg-black text-white border border-slate-800' :
-                                      quote.provider === 'Ola' ? 'bg-lime-500 text-slate-950' :
-                                      quote.provider === 'Rapido' ? 'bg-amber-400 text-black' :
-                                      'bg-[#ff5a00] text-white'
-                                    }`}>
-                                      {quote.provider.slice(0, 2).toUpperCase()}
-                                    </div>
-                                    <div>
-                                      <h4 className="font-bold text-xs text-white flex items-center space-x-1.5 flex-wrap gap-1">
-                                        <span>{quote.vehicle}</span>
-                                        {quote.commissionFree && (
-                                          <span className="text-[7px] text-emerald-400 font-extrabold bg-emerald-950 px-1 py-0.2 rounded border border-emerald-900/50 uppercase tracking-widest">Commission Free</span>
-                                        )}
-                                      </h4>
-                                      <div className="flex items-center space-x-1 mt-0.5 text-[9px] text-slate-400">
-                                        <span>{quote.provider}</span>
-                                        <span>•</span>
-                                        <span className="text-emerald-400 font-medium">★ {quote.rating}</span>
-                                      </div>
-                                    </div>
-                                  </div>
-
-                                  <div className="text-right">
-                                    <span className="text-sm font-black text-white">₹{quote.fare}</span>
-                                    {quote.surge && (
-                                      <span className="block text-[7px] text-amber-400 font-semibold bg-amber-950/80 border border-amber-900/40 rounded px-1 mt-0.5">
-                                        ⚡ Surge {quote.surgeMultiplier}x
-                                      </span>
-                                    )}
-                                  </div>
+                            {chatEditingIndex !== idx ? (
+                              <div className="space-y-1.5 text-[11px] text-slate-300">
+                                <div className="flex items-start space-x-1">
+                                  <span className="text-emerald-400 font-bold">From:</span>
+                                  <span className="truncate">{parsedState.pickup || 'Not set'}</span>
                                 </div>
-
-                                {/* Badges and Reasons */}
-                                {badge && (
-                                  <div className="flex items-center space-x-1.5 bg-[#1f2c34]/50 px-2 py-1 rounded border border-slate-800/30">
-                                    <span className={`text-[8px] font-extrabold uppercase px-1 rounded ${
-                                      badge.includes('Recommended') ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' :
-                                      badge.includes('Cheapest') ? 'bg-yellow-950 text-yellow-400 border border-yellow-800' :
-                                      'bg-blue-950 text-blue-400 border border-blue-800'
-                                    }`}>
-                                      {badge.replace('⭐ ', '').replace('💰 ', '').replace('⚡ ', '')}
-                                    </span>
-                                    <span className="text-[9px] text-slate-300 italic">{reason}</span>
-                                  </div>
-                                )}
-
-                                {/* Details & CTA */}
-                                <div className="pt-2 border-t border-slate-800/50 flex items-center justify-between text-[10px]">
-                                  <div className="flex items-center space-x-1.5 text-slate-400 text-[9px]">
-                                    <span>Dist: <strong className="text-slate-200">{quote.distanceKm || '—'} km</strong></span>
-                                    <span>|</span>
-                                    <span>Duration: <strong className="text-slate-200">{formatDuration(quote.durationMinutes)}</strong></span>
-                                    <span>|</span>
-                                    <span>ETA: <strong className="text-slate-200">{quote.etaMinutes} mins</strong></span>
-                                  </div>
-
-                                  <div className="flex items-center space-x-1.5">
-                                    <button
-                                      onClick={() => setExpandedQuoteId(isExpanded ? null : quote.id)}
-                                      className="text-slate-400 hover:text-white underline text-[9px] mr-1 cursor-pointer"
-                                    >
-                                      {isExpanded ? 'Hide Charges' : 'View Charges'}
-                                    </button>
-                                    <button 
-                                      onClick={() => handleRedirect(quote)}
-                                      className="bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white font-bold px-2.5 py-1 rounded text-[10px] transition flex items-center space-x-1 cursor-pointer"
-                                    >
-                                      <span>Book Now</span>
-                                      <ExternalLink className="w-2.5 h-2.5" />
-                                    </button>
-                                  </div>
+                                <div className="flex items-start space-x-1">
+                                  <span className="text-red-400 font-bold">To:</span>
+                                  <span className="truncate">{parsedState.dropoff || 'Not set'}</span>
                                 </div>
-
-                                {/* Expanded breakdown receipt */}
-                                {isExpanded && (
-                                  <div className="mt-2 p-2.5 bg-slate-950 rounded-lg border border-slate-800/80 space-y-1 text-[9px] text-slate-400">
-                                    <span className="text-[7px] uppercase tracking-wider font-extrabold text-slate-500 block mb-0.5">Fare Breakdown Summary</span>
-                                    <div className="flex justify-between">
-                                      <span>Base Flag-down Fee</span>
-                                      <span>₹{baseFee}</span>
-                                    </div>
-                                    <div className="flex justify-between">
-                                      <span>Distance-based rate</span>
-                                      <span>₹{distanceCharge}</span>
-                                    </div>
-                                    {airportFee > 0 && (
-                                      <div className="flex justify-between">
-                                        <span>Airport Fee</span>
-                                        <span>₹{airportFee}</span>
-                                      </div>
-                                    )}
-                                    <div className="flex justify-between">
-                                      <span>Platform Svc Booking Fee</span>
-                                      <span className={quote.provider === 'Namma Yatri' ? 'text-emerald-400 font-bold' : ''}>
-                                        {quote.provider === 'Namma Yatri' ? '₹0 (Direct!)' : `₹${platformFee}`}
-                                      </span>
-                                    </div>
-                                    <div className="flex justify-between">
-                                      <span>GST Tax (5%)</span>
-                                      <span>₹{gst}</span>
-                                    </div>
-                                    <div className="border-t border-slate-800 pt-1 flex justify-between font-bold text-white text-[10px]">
-                                      <span>Total Estimated Fare</span>
-                                      <span className="text-emerald-400">₹{quote.fare}</span>
-                                    </div>
-                                  </div>
-                                )}
+                                <div className="flex justify-between text-[10px] text-slate-400 pt-1 border-t border-slate-800/60">
+                                  <span>👥 Passengers: <strong className="text-white">{parsedState.passengers || 1}</strong></span>
+                                  <span>🕒 Schedule: <strong className="text-white">{parsedState.date || 'Today'} {parsedState.time || 'Now'}</strong></span>
+                                </div>
                               </div>
-                            );
-                          })}
+                            ) : (
+                              /* Chat Editor Form */
+                              <div className="space-y-3 pt-1">
+                                {/* Pickup field */}
+                                <div className="space-y-1 relative">
+                                  <label className="text-[9px] uppercase font-bold text-slate-400">Pickup Location (From)</label>
+                                  <div className="relative">
+                                    <MapPin className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-emerald-400" />
+                                    <input 
+                                      type="text"
+                                      value={draftPickup}
+                                      onChange={(e) => {
+                                        setDraftPickup(e.target.value);
+                                        setPickupInput(e.target.value);
+                                      }}
+                                      placeholder="Search pickup..."
+                                      className="w-full bg-[#111b21] border border-slate-700 focus:border-emerald-500 rounded-lg pl-8 pr-3 py-1.5 text-[11px] text-white focus:outline-none"
+                                    />
+                                  </div>
+                                  {/* Pickup Suggestions dropdown inside chatbot */}
+                                  {pickupSuggestions.length > 0 && (
+                                    <div className="absolute left-0 right-0 bg-[#111b21] border border-slate-700 rounded-lg max-h-32 overflow-y-auto divide-y divide-slate-800 shadow-xl mt-1 z-50">
+                                      {pickupSuggestions.map((sug, sIdx) => (
+                                        <button
+                                          key={sIdx}
+                                          type="button"
+                                          onClick={() => {
+                                            setDraftPickup(sug.display_name);
+                                            setDraftPickupLat(sug.lat !== undefined && sug.lat !== null ? parseFloat(String(sug.lat)) : null);
+                                            setDraftPickupLng(sug.lng !== undefined && sug.lng !== null ? parseFloat(String(sug.lng)) : null);
+                                            setPickupInput('');
+                                            setPickupSuggestions([]);
+                                          }}
+                                          className="w-full text-left px-2 py-1.5 text-[10px] text-slate-200 hover:bg-slate-800 flex items-start space-x-1.5 transition"
+                                        >
+                                          <MapPin className="w-3 h-3 text-slate-400 mt-0.5 flex-shrink-0" />
+                                          <span className="truncate">{sug.display_name}</span>
+                                        </button>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+
+                                {/* Dropoff field */}
+                                <div className="space-y-1 relative">
+                                  <label className="text-[9px] uppercase font-bold text-slate-400">Dropoff Location (To)</label>
+                                  <div className="relative">
+                                    <MapPin className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-red-400" />
+                                    <input 
+                                      type="text"
+                                      value={draftDropoff}
+                                      onChange={(e) => {
+                                        setDraftDropoff(e.target.value);
+                                        setDropoffInput(e.target.value);
+                                      }}
+                                      placeholder="Search dropoff..."
+                                      className="w-full bg-[#111b21] border border-slate-700 focus:border-emerald-500 rounded-lg pl-8 pr-3 py-1.5 text-[11px] text-white focus:outline-none"
+                                    />
+                                  </div>
+                                  {/* Dropoff Suggestions dropdown inside chatbot */}
+                                  {dropoffSuggestions.length > 0 && (
+                                    <div className="absolute left-0 right-0 bg-[#111b21] border border-slate-700 rounded-lg max-h-32 overflow-y-auto divide-y divide-slate-800 shadow-xl mt-1 z-50">
+                                      {dropoffSuggestions.map((sug, sIdx) => (
+                                        <button
+                                          key={sIdx}
+                                          type="button"
+                                          onClick={() => {
+                                            setDraftDropoff(sug.display_name);
+                                            setDraftDropoffLat(sug.lat !== undefined && sug.lat !== null ? parseFloat(String(sug.lat)) : null);
+                                            setDraftDropoffLng(sug.lng !== undefined && sug.lng !== null ? parseFloat(String(sug.lng)) : null);
+                                            setDropoffInput('');
+                                            setDropoffSuggestions([]);
+                                          }}
+                                          className="w-full text-left px-2 py-1.5 text-[10px] text-slate-200 hover:bg-slate-800 flex items-start space-x-1.5 transition"
+                                        >
+                                          <MapPin className="w-3 h-3 text-slate-400 mt-0.5 flex-shrink-0" />
+                                          <span className="truncate">{sug.display_name}</span>
+                                        </button>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+
+                                {/* Passengers & Schedule Grid */}
+                                <div className="grid grid-cols-2 gap-2">
+                                  <div className="space-y-1">
+                                    <label className="text-[9px] uppercase font-bold text-slate-400">Passengers</label>
+                                    <select 
+                                      value={draftPassengers}
+                                      onChange={(e) => setDraftPassengers(parseInt(e.target.value))}
+                                      className="w-full bg-[#111b21] border border-slate-700 rounded-lg px-2 py-1 text-[11px] text-white focus:outline-none focus:border-emerald-500"
+                                    >
+                                      {[1, 2, 3, 4, 5, 6].map(num => (
+                                        <option key={num} value={num}>{num} Member{num > 1 ? 's' : ''}</option>
+                                      ))}
+                                    </select>
+                                  </div>
+
+                                  <div className="space-y-1">
+                                    <label className="text-[9px] uppercase font-bold text-slate-400">Schedule</label>
+                                    <div className="flex space-x-1">
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setDraftDate('Today');
+                                          setDraftTime('Now');
+                                        }}
+                                        className={`flex-1 py-1 text-[9px] font-bold rounded border transition ${draftDate === 'Today' && draftTime === 'Now' ? 'bg-emerald-600 border-emerald-500 text-white shadow' : 'bg-[#111b21] border-slate-700 text-slate-400 hover:text-white'}`}
+                                      >
+                                        Now
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setDraftDate('Tomorrow');
+                                          setDraftTime('10:00 AM');
+                                        }}
+                                        className={`flex-1 py-1 text-[9px] font-bold rounded border transition ${draftDate === 'Tomorrow' ? 'bg-emerald-600 border-emerald-500 text-white shadow' : 'bg-[#111b21] border-slate-700 text-slate-400 hover:text-white'}`}
+                                      >
+                                        Later
+                                      </button>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* Re-calculate button */}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const updated = {
+                                      ...parsedState,
+                                      pickup: draftPickup,
+                                      pickupLat: draftPickupLat,
+                                      pickupLng: draftPickupLng,
+                                      dropoff: draftDropoff,
+                                      dropoffLat: draftDropoffLat,
+                                      dropoffLng: draftDropoffLng,
+                                      passengers: draftPassengers,
+                                      date: draftDate,
+                                      time: draftTime,
+                                      rideType: draftPassengers > 3 ? 'suv' as const : 'cab' as const
+                                    };
+                                    setParsedState(updated);
+                                    setChatEditingIndex(null);
+                                    
+                                    // Push a user confirmation message
+                                    const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                                    setChatHistory(prev => [
+                                      ...prev,
+                                      { 
+                                        sender: 'user', 
+                                        text: `🔄 Recalculate: From ${draftPickup} to ${draftDropoff} (${draftPassengers} traveler${draftPassengers > 1 ? 's' : ''}, ${draftDate} ${draftTime})`, 
+                                        timestamp 
+                                      }
+                                    ]);
+                                    
+                                    setIsTyping(true);
+                                    setTimeout(() => {
+                                      setIsTyping(false);
+                                      calculateAdapterQuotes(updated);
+                                    }, 600);
+                                  }}
+                                  className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-1.5 rounded-lg text-[10px] transition flex items-center justify-center space-x-1 shadow-md cursor-pointer"
+                                >
+                                  <RefreshCw className="w-3.5 h-3.5" />
+                                  <span>Re-calculate Fares</span>
+                                </button>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* 2. Sorting & Category Filters Header */}
+                          <div className="bg-[#182229]/60 border border-slate-800/60 rounded-xl p-2.5 mb-3 space-y-2 text-left">
+                            {/* Sort By Row */}
+                            <div className="flex items-center justify-between">
+                              <span className="text-[9px] uppercase font-bold text-slate-400 tracking-wider">Sort by:</span>
+                              <div className="flex space-x-1">
+                                {[
+                                  { key: 'price', label: '💰 Cheapest' },
+                                  { key: 'eta', label: '⚡ Fastest' },
+                                  { key: 'value', label: '⭐ Recommended' }
+                                ].map(opt => (
+                                  <button
+                                    key={opt.key}
+                                    onClick={() => setSortBy(opt.key as any)}
+                                    className={`px-2 py-1 rounded-full text-[9px] font-bold border transition ${sortBy === opt.key ? 'bg-emerald-600 border-emerald-500 text-white shadow' : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'}`}
+                                  >
+                                    {opt.label}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+
+                            {/* Category Filter Row */}
+                            <div className="flex items-center justify-between pt-1.5 border-t border-slate-800/40">
+                              <span className="text-[9px] uppercase font-bold text-slate-400 tracking-wider">Vehicle:</span>
+                              <div className="flex flex-wrap gap-1 justify-end max-w-[70%]">
+                                {[
+                                  { key: 'all', label: 'All' },
+                                  { key: 'bike', label: '🏍️ Bike' },
+                                  { key: 'auto', label: '🛺 Auto' },
+                                  { key: 'cab', label: '🚗 Cab' },
+                                  { key: 'suv', label: '🚙 SUV' }
+                                ].map(opt => (
+                                  <button
+                                    key={opt.key}
+                                    disabled={parsedState.passengers !== null && parsedState.passengers > 1 && opt.key === 'bike'}
+                                    onClick={() => setFilterCategory(opt.key as any)}
+                                    className={`px-1.5 py-0.5 rounded text-[9px] font-bold border transition ${
+                                      filterCategory === opt.key 
+                                        ? 'bg-emerald-600 border-emerald-500 text-white shadow' 
+                                        : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
+                                    } disabled:opacity-30 disabled:hover:text-slate-400`}
+                                  >
+                                    {opt.label}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* 3. The Sorted & Filtered Cab Cards List */}
+                          {getSortedAndFilteredQuotesForList(chat.quotes || []).length === 0 ? (
+                            <div className="bg-[#111b21] border border-slate-800/80 rounded-xl p-4 text-center text-slate-400 text-[11px]">
+                              ⚠️ No vehicles found matching this category. Please clear filters or choose another vehicle category above.
+                            </div>
+                          ) : (
+                            getSortedAndFilteredQuotesForList(chat.quotes || []).map((quote) => {
+                              const filteredList = getSortedAndFilteredQuotesForList(chat.quotes || []);
+                              const { badge, reason } = getQuoteBadgeAndReason(quote, filteredList);
+                              
+                              const isBestPrice = quote.fare === Math.min(...filteredList.map(q => q.fare));
+                              const isFastest = quote.etaMinutes === Math.min(...filteredList.map(q => q.etaMinutes));
+
+                              const isExpanded = expandedQuoteId === quote.id;
+
+                              const isAirport = !!(parsedState.pickup?.toLowerCase().includes('airport') || parsedState.dropoff?.toLowerCase().includes('airport'));
+                              const airportFee = isAirport ? 100 : 0;
+                              
+                              let platformFee = 15;
+                              if (quote.provider === 'Namma Yatri') platformFee = 0;
+                              else if (quote.provider === 'Rapido') platformFee = 10;
+                              else if (quote.provider === 'Ola') platformFee = 20;
+
+                              const gst = Math.round(quote.fare * 0.0476);
+                              
+                              let baseFee = 30;
+                              if (quote.category === 'bike') baseFee = 15;
+                              else if (quote.category === 'auto') baseFee = 25;
+                              else if (quote.category === 'suv') baseFee = 60;
+
+                              const distanceCharge = Math.max(0, quote.fare - airportFee - platformFee - gst - baseFee);
+
+                              return (
+                                <div 
+                                  key={quote.id}
+                                  className="bg-[#111b21] border border-slate-800/80 rounded-xl p-3 shadow-md hover:border-slate-700 transition text-[#e9edef] space-y-2.5 text-left"
+                                >
+                                  {/* Top Line: Provider and Badge */}
+                                  <div className="flex items-start justify-between">
+                                    <div className="flex items-center space-x-2">
+                                      <div className={`px-2 py-1 rounded text-center font-black text-[10px] ${
+                                        quote.provider === 'Uber' ? 'bg-black text-white border border-slate-800' :
+                                        quote.provider === 'Ola' ? 'bg-lime-500 text-slate-950' :
+                                        quote.provider === 'Rapido' ? 'bg-amber-400 text-black' :
+                                        'bg-[#ff5a00] text-white'
+                                      }`}>
+                                        {quote.provider.slice(0, 2).toUpperCase()}
+                                      </div>
+                                      <div>
+                                        <h4 className="font-bold text-xs text-white flex items-center space-x-1.5 flex-wrap gap-1">
+                                          <span>{quote.vehicle}</span>
+                                          {quote.commissionFree && (
+                                            <span className="text-[7px] text-emerald-400 font-extrabold bg-emerald-950 px-1 py-0.2 rounded border border-emerald-900/50 uppercase tracking-widest">Commission Free</span>
+                                          )}
+                                        </h4>
+                                        <div className="flex items-center space-x-1 mt-0.5 text-[9px] text-slate-400">
+                                          <span>{quote.provider}</span>
+                                          <span>•</span>
+                                          <span className="text-emerald-400 font-medium">★ {quote.rating}</span>
+                                        </div>
+                                      </div>
+                                    </div>
+
+                                    <div className="text-right">
+                                      <span className="text-sm font-black text-white">₹{quote.fare}</span>
+                                      {quote.surge && (
+                                        <span className="block text-[7px] text-amber-400 font-semibold bg-amber-950/80 border border-amber-900/40 rounded px-1 mt-0.5">
+                                          ⚡ Surge {quote.surgeMultiplier}x
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  {/* Badges and Reasons */}
+                                  {badge && (
+                                    <div className="flex items-center space-x-1.5 bg-[#1f2c34]/50 px-2 py-1 rounded border border-slate-800/30">
+                                      <span className={`text-[8px] font-extrabold uppercase px-1 rounded ${
+                                        badge.includes('Recommended') ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' :
+                                        badge.includes('Cheapest') ? 'bg-yellow-950 text-yellow-400 border border-yellow-800' :
+                                        'bg-blue-950 text-blue-400 border border-blue-800'
+                                      }`}>
+                                        {badge.replace('⭐ ', '').replace('💰 ', '').replace('⚡ ', '')}
+                                      </span>
+                                      <span className="text-[9px] text-slate-300 italic">{reason}</span>
+                                    </div>
+                                  )}
+
+                                  {/* Details & CTA */}
+                                  <div className="pt-2 border-t border-slate-800/50 flex items-center justify-between text-[10px]">
+                                    <div className="flex items-center space-x-1.5 text-slate-400 text-[9px]">
+                                      <span>Dist: <strong className="text-slate-200">{quote.distanceKm || '—'} km</strong></span>
+                                      <span>|</span>
+                                      <span>Duration: <strong className="text-slate-200">{formatDuration(quote.durationMinutes)}</strong></span>
+                                      <span>|</span>
+                                      <span>ETA: <strong className="text-slate-200">{quote.etaMinutes} mins</strong></span>
+                                    </div>
+
+                                    <div className="flex items-center space-x-1.5">
+                                      <button
+                                        onClick={() => setExpandedQuoteId(isExpanded ? null : quote.id)}
+                                        className="text-slate-400 hover:text-white underline text-[9px] mr-1 cursor-pointer"
+                                      >
+                                        {isExpanded ? 'Hide Charges' : 'View Charges'}
+                                      </button>
+                                      <button 
+                                        onClick={() => handleRedirect(quote)}
+                                        className="bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white font-bold px-2.5 py-1 rounded text-[10px] transition flex items-center space-x-1 cursor-pointer"
+                                      >
+                                        <span>Book Now</span>
+                                        <ExternalLink className="w-2.5 h-2.5" />
+                                      </button>
+                                    </div>
+                                  </div>
+
+                                  {/* Expanded breakdown receipt */}
+                                  {isExpanded && (
+                                    <div className="mt-2 p-2.5 bg-slate-950 rounded-lg border border-slate-800/80 space-y-1 text-[9px] text-slate-400">
+                                      <span className="text-[7px] uppercase tracking-wider font-extrabold text-slate-500 block mb-0.5">Fare Breakdown Summary</span>
+                                      <div className="flex justify-between">
+                                        <span>Base Flag-down Fee</span>
+                                        <span>₹{baseFee}</span>
+                                      </div>
+                                      <div className="flex justify-between">
+                                        <span>Distance-based rate</span>
+                                        <span>₹{distanceCharge}</span>
+                                      </div>
+                                      {airportFee > 0 && (
+                                        <div className="flex justify-between">
+                                          <span>Airport Fee</span>
+                                          <span>₹{airportFee}</span>
+                                        </div>
+                                      )}
+                                      <div className="flex justify-between">
+                                        <span>Platform Svc Booking Fee</span>
+                                        <span className={quote.provider === 'Namma Yatri' ? 'text-emerald-400 font-bold' : ''}>
+                                          {quote.provider === 'Namma Yatri' ? '₹0 (Direct!)' : `₹${platformFee}`}
+                                        </span>
+                                      </div>
+                                      <div className="flex justify-between">
+                                        <span>GST Tax (5%)</span>
+                                        <span>₹{gst}</span>
+                                      </div>
+                                      <div className="border-t border-slate-800 pt-1 flex justify-between font-bold text-white text-[10px]">
+                                        <span>Total Estimated Fare</span>
+                                        <span className="text-emerald-400">₹{quote.fare}</span>
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })
+                          )}
                         </div>
                       )}
                       
