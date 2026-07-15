@@ -939,6 +939,10 @@ if (process.env.NODE_ENV === 'production') {
   app.use(vite.middlewares);
 }
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`RideEasy Server booting on port ${PORT}...`);
-});
+if (!process.env.VERCEL) {
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`RideEasy Server booting on port ${PORT}...`);
+  });
+}
+
+export default app;
